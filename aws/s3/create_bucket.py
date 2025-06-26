@@ -1,7 +1,6 @@
 """
 Handles S3 bucket creation and validation for storing datasets, models, and outputs.
 """
-
 import logging
 import boto3
 from botocore.exceptions import ClientError
@@ -9,6 +8,12 @@ from typing import Protocol
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
+if not logger.hasHandlers():
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter('[%(levelname)s] %(message)s')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
 
 class S3ClientInterface(Protocol):
     """Class to serve as the interface (for testing)"""
@@ -52,7 +57,3 @@ class BotoS3Client(S3ClientInterface):
         except ClientError as e:
             logger.error(f'[FAIL] cannot create bucket "{bucket_name}" ({e})')
             return False
-
-
-
-
