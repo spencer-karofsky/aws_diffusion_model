@@ -1,1 +1,2 @@
-# aws_diffusion_model
+# Diffusion Model Trained on Amazon Web Services (AWS)
+#### Spencer Karofsky
