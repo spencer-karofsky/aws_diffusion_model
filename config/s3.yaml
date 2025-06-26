@@ -1,5 +1,0 @@
-# s3 config
-bucket_names:
-  - ddpm-project-data
-  - ddpm-project-models
-  - ddpm-project-outputs
