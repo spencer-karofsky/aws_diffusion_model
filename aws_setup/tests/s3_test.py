@@ -1,13 +1,19 @@
 """
 Test S3BucketManager and S3ObjectManager functionalities with moto (fake AWS calls that mimics boto3) and Python's unittest
 """
-from core import *
+import boto3
+from aws_setup.utils.logger import logger
+from aws_setup.managers.s3_manager import S3BucketManager, S3ObjectManager
+from botocore.exceptions import ClientError
+import unittest
+from moto import mock_s3
+import os
 
 class S3BucketManagerTest(unittest.TestCase):
     def setUp(self):
         """Set up mocked S3 and S3BucketManager"""
-        self.mock_s3 = mock_aws(service="s3")
-        self.mock_s3.start()
+        self.mock = mock_s3()
+        self.mock.start()
 
         self.client = boto3.client('s3')
         self.bucket_manager = S3BucketManager()
@@ -17,7 +23,7 @@ class S3BucketManagerTest(unittest.TestCase):
     def tearDown(self):
         """Terminate test resources
         """
-        self.mock_s3.stop()
+        self.mock.stop()
 
     def _all_buckets_exist(self):
         """Return True if all fake buckets in fake_bucket_names exist
@@ -85,6 +91,6 @@ class S3BucketManagerTest(unittest.TestCase):
 
 
 # Test S3ObjectManager
-@mock_aws
-class S3ObjectManagerTest(unittest.TestCase):
-    pass
+# @mock_aws
+# class S3ObjectManagerTest(unittest.TestCase):
+#     pass

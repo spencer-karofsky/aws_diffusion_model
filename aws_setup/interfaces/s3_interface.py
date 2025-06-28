@@ -1,7 +1,7 @@
 """
 Defines interfaces for all S3 Functionalities
 """
-from core import *
+from typing import Protocol
 from typing import List
 
 class S3BucketInterface(Protocol):
