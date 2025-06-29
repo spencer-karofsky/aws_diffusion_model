@@ -1,5 +1,16 @@
 """
-Defines interfaces for all S3 Functionalities
+Defines interfaces for all Amazon Simple Storage Service (S3) Functionalities.
+
+Bucket Interface:
+1. Create Bucket
+2. Delete Bucket
+3. List Buckets
+
+Object Interface:
+1. Upload Object
+2. Download Object
+3. Delete Object
+4. List Objects
 """
 from typing import Protocol
 from typing import List, Tuple
