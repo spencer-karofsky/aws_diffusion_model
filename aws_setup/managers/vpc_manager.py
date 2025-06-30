@@ -8,7 +8,6 @@ from botocore.exceptions import ClientError
 from botocore.client import BaseClient
 from typing import Optional, List
 
-
 class VPCSetupManager(VPCSetupInterface):
     def __init__(self, ec2_client: BaseClient):
         """Define VPC client
@@ -142,8 +141,7 @@ class VPCNetworkManager(VPCNetworkInterface):
             True/False to indicate success/failure
         """
         try:
-            self.client.attach_internet_gateway(DryRun=True,
-                                                InternetGatewayId=self.igw_id,
+            self.client.attach_internet_gateway(InternetGatewayId=self.igw_id,
                                                 VpcId=self.vpc_id)
         except ClientError as e:
             logger.error(f'[FAIL] cannot attach internet gateway ({e})')
@@ -159,8 +157,7 @@ class VPCNetworkManager(VPCNetworkInterface):
             True/False to indicate success/failure
         """
         try:
-            response = self.client.create_internet_gateway(TagSpecifications=[{'ResourceType': 'internet-gateway'}],
-                                                           DryRun=True)
+            response = self.client.create_internet_gateway(TagSpecifications=[{'ResourceType': 'internet-gateway'}])
         except ClientError as e:
             logger.error(f'[FAIL] cannot create internet gateway ({e})')
             return False
@@ -184,7 +181,6 @@ class VPCNetworkManager(VPCNetworkInterface):
         """
         try:
             response = self.client.create_route_table(TagSpecifications=[{'ResourceType': 'route-table'}],
-                                                      DryRun=True,
                                                       VpcId=self.vpc_id)
         except ClientError as e:
             logger.error(f'[FAIL] cannot create route table ({e})')
@@ -208,8 +204,7 @@ class VPCNetworkManager(VPCNetworkInterface):
         try:
             self.client.create_route(RouteTableId=self.route_table_id,
                                      DestinationCidrBlock=destination_cidr,
-                                     GatewayId=self.igw_id,
-                                     DryRun=True)
+                                     GatewayId=self.igw_id)
         except ClientError as e:
             logger.error(f'[FAIL] cannot create route and add to the route table ({e})')
             return False
@@ -224,7 +219,7 @@ class VPCNetworkManager(VPCNetworkInterface):
             list of destination CIDRs
         """
         try:
-            response = self.client.describe_route_tables(DryRun=True)
+            response = self.client.describe_route_tables()
         except ClientError as e:
             logger.error(f'[FAIL] cannot retrieve routes in the route table ({e})')
             return []
@@ -242,8 +237,7 @@ class VPCNetworkManager(VPCNetworkInterface):
         """
         try:
             self.client.delete_route(RouteTableId=self.route_table_id,
-                                     DestinationCidrBlock=destination_cidr,
-                                     DryRun=True)
+                                     DestinationCidrBlock=destination_cidr)
         except ClientError as e:
             logger.error(f'[FAIL] cannot delete route in the route table ({e})')
             return False
@@ -270,4 +264,70 @@ class VPCNetworkManager(VPCNetworkInterface):
         return True
 
 class VPCSecurityManager(VPCSecurityInterface):
-    pass
+    def __init__(self,
+                 ec2_client: BaseClient,
+                 vpc_id: str,
+                 description: str,
+                 group_name: str):
+        """Define security instance
+        Args:
+            ec2_client: the EC2 client
+            vpc_id: the ID of the vpc to apply the policy to
+            description: description of security group
+            group_name: the name of the security group
+        """
+        self.client = ec2_client
+        self.vpc_id = vpc_id
+        self.description = description
+        self.group_name = group_name
+
+    def _authorize_all_egress(self) -> bool:
+        """Authorize outbound traffic to anywhere
+        Docs:
+            https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2/client/authorize_security_group_egress.html
+        Return:
+            True/False to indicate success/failure
+        """
+        try:
+            self.client.authorize_security_group_egress(
+                GroupId=self.security_group_id,
+                IpPermissions=[
+                    {
+                        'IpProtocol': '-1',  # All protocols
+                        'IpRanges': [
+                            {'CidrIp': '0.0.0.0/0'}  # To anywhere
+                        ]
+                    }
+                ]
+            )
+        except ClientError as e:
+            logger.error(f'[FAIL] cannot authorize egress ({e})')
+            return False
+        logger.info(f'[SUCCESS] egress authorized')
+        return True
+
+    def create_security_group(self, egress: bool = True) -> bool:
+        """Creates the security group with which to apply policies
+        Docs:
+            https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2/client/create_security_group.html
+        Args:
+            egress: authorizes outbound traffic when enabled, such as for 
+        Return:
+            True/False to indicate success/failure
+        """
+        try:
+            response = self.client.create_security_group(Description=self.description,
+                                                         GroupName=self.group_name,
+                                                         VpcId=self.vpc_id,
+                                                         DryRun=True)
+        except ClientError as e:
+            logger.error(f'[FAIL] cannot create security group ({e})')
+            return False
+        logger.info(f'[SUCCESS] created security group')
+        self.security_group_id = response['GroupId']
+        if egress:
+            status = self._authorize_all_egress()
+            if status:
+                return True
+            return False
+        return True

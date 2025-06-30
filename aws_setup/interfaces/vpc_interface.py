@@ -69,4 +69,14 @@ class VPCNetworkInterface(Protocol):
         raise NotImplementedError
 
 class VPCSecurityInterface(Protocol):
-    pass
+    def _authorize_all_egress(self) -> bool:
+        raise NotImplementedError
+    
+    def create_security_group(self, egress: bool) -> bool:
+        raise NotImplementedError
+    
+    # def authorize_ssh(self) -> bool: # Implement if needed
+    #     raise NotImplementedError
+        
+    # def authorize_http_https(self) -> bool:
+    #     raise NotImplementedError
