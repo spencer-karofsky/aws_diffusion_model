@@ -1,10 +1,6 @@
 """
-Implements all VPC functionalities
-
-NOTES:
-
+Implements all VPC functionalities.
 """
-import boto3
 from aws_setup.utils.logger import logger
 from aws_setup.interfaces.vpc_interface import VPCSetupInterface, VPCNetworkInterface, VPCSecurityInterface
 from botocore.exceptions import ClientError

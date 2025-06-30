@@ -14,7 +14,7 @@ Network Interface:
 2. Attach Internet Gateway
     - Attach an Internet Gateway. Allows instances on the network to access the internet and adds this functionality to the VPC.
 3. Define Route Table
-    - Create a Route Table. Defines communication routes within the network.
+    - Create a Route Table and add routes. Defines communication routes within the network.
 
 Security Interface:
 1. Create Security Group
@@ -24,7 +24,6 @@ Security Interface:
 from typing import Protocol, List
 
 class VPCSetupInterface(Protocol):
-    # Getter methods
     def get_cidr_block(self) -> str:
         raise NotImplementedError
     

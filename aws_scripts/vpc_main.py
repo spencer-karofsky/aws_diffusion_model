@@ -1,5 +1,5 @@
 """
-Create VPC infrastructure.
+Create VPC infrastructure after validating in vpc_validation.py.
 """
 import sys
 import os

@@ -1,5 +1,5 @@
 """
-Implements all S3 functionalities
+Implements all S3 functionalities.
 """
 import boto3
 from aws_setup.utils.logger import logger
