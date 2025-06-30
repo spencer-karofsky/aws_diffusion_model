@@ -39,6 +39,12 @@ class VPCSetupInterface(Protocol):
     
     def create_vpc(self) -> bool:
         raise NotImplementedError
+    
+    def _get_vpc_id_list(self) -> List[str]:
+        raise NotImplementedError
+
+    def delete_vpc(self, vpc_id: str = None) -> bool:
+        raise NotImplementedError
 
 class VPCNetworkInterface(Protocol):
     def _enable_auto_assigned_ip(self) -> bool:

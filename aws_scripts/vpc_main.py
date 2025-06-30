@@ -30,6 +30,6 @@ if __name__ == "__main__":
 
     # Setup security group
     security = VPCSecurityManager(ec2_client=ec2_client,
-                                  vpc_id=vpc_id,
-                                  description='security group for ddpm project',
-                                  group_name='ddpm-sg')
+                                vpc_id=vpc_id,
+                                description='security group for ddpm project',
+                                group_name='ddpm-sg')

@@ -1,5 +1,8 @@
 """
 Implements all VPC functionalities
+
+NOTES:
+
 """
 import boto3
 from aws_setup.utils.logger import logger
@@ -53,7 +56,7 @@ class VPCSetupManager(VPCSetupInterface):
         self.dns = True
         return True
 
-    def create_vpc(self, vpc_name: Optional[str] = None) -> bool:
+    def create_vpc(self, vpc_name: str = None) -> bool:
         """Creates a VPC
         Docs:
             https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2/client/create_vpc.html
@@ -62,6 +65,8 @@ class VPCSetupManager(VPCSetupInterface):
         Return:
             True/False to indicate success/failure
         """
+        if not vpc_name:
+            vpc_name = 'MyVPC'
         try:
             response = self.client.create_vpc(CidrBlock=self.cidr_block,
                                               InstanceTenancy='default', # default for free tier
@@ -70,13 +75,60 @@ class VPCSetupManager(VPCSetupInterface):
             logger.error(f'[FAIL] cannot create VPC ({e})')
             return False
         
-        logger.info(f'[SUCCESS] created VPC')
         self.vpc_id = response['Vpc']['VpcId']
+        logger.info(f'[SUCCESS] created VPC with id "{self.vpc_id}"')
 
         # Enable DNS
         self._enable_dns()
 
         return True
+    
+    def _get_vpc_id_list(self):
+        """Get list of VPC IDs
+        Docs:
+            https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2/client/describe_vpcs.html
+        Return:
+            List of VPC IDs
+        """
+        try:
+            response = self.client.describe_vpcs()
+        except ClientError as e:
+            logger.error(f'[FAIL] cannot describe VPCs ({e})')
+            return []
+        vpc_ids = [vpc['VpcId'] for vpc in response.get('Vpcs', [])]
+        return vpc_ids
+    
+    def delete_vpc(self, vpc_id: str = None) -> bool:
+        """Deletes the VPC. If no VPC ID is provided, it deletes all VPCs
+        Docs:
+            https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2/client/delete_vpc.html
+        Args:
+            vpc_id: the ID of the VPC. Pass in as parameter in case we just want to delete an existing VPC even if this object did not create it.
+        Return:
+            True/False to indicate success/failure
+        """
+        if not vpc_id:
+            vpc_ids = self._get_vpc_id_list()
+            # Delete each VPC
+            if len(vpc_ids) > 0:
+                for vpc_id in vpc_ids:
+                    try:
+                        self.client.delete_vpc(VpcId=vpc_id)
+                        logger.info(f'[SUCCESS] deleted VPC "{vpc_id}"')
+                    except ClientError as e:
+                        logger.error(f'[FAIL] cannot delete VPC "{vpc_id}" ({e})')
+                        return False
+                return True
+            return False
+        else:
+            try:
+                self.client.delete_vpc(VpcId=vpc_id)
+            except ClientError as e:
+                logger.error(f'[FAIL] cannot delete VPC "{vpc_id}" ({e})')
+                return False
+            
+            logger.info(f'[SUCCESS] deleted VPC "{vpc_id}"')
+            return True
 
 class VPCNetworkManager(VPCNetworkInterface):
     def __init__(self, ec2_client: BaseClient, vpc_id: Optional[str]):
@@ -227,12 +279,13 @@ class VPCNetworkManager(VPCNetworkInterface):
             list of destination CIDRs
         """
         try:
-            response = self.client.describe_route_tables()
+            response = self.client.describe_route_tables(RouteTableIds=[self.route_table_id])
         except ClientError as e:
             logger.error(f'[FAIL] cannot retrieve routes in the route table ({e})')
             return []
         logger.info(f'[SUCCESS] retrieved routes in the route table')
-        return [r['DestinationCidrBlock'] for r in response['RouteTables']['Routes']]
+        # Assume only one route table
+        return [r['DestinationCidrBlock'] for r in response['RouteTables'][0]['Routes']]
     
     def delete_route(self, destination_cidr: str) -> bool:
         """Delete route in route table
@@ -296,16 +349,15 @@ class VPCSecurityManager(VPCSecurityInterface):
         try:
             self.client.authorize_security_group_egress(
                 GroupId=self.security_group_id,
-                IpPermissions=[
-                    {
-                        'IpProtocol': '-1',  # All protocols
-                        'IpRanges': [
-                            {'CidrIp': '0.0.0.0/0'}  # To anywhere
-                        ]
-                    }
-                ]
+                IpPermissions=[{
+                    'IpProtocol': '-1',
+                    'IpRanges': [{'CidrIp': '0.0.0.0/0'}]
+                }]
             )
         except ClientError as e:
+            if 'InvalidPermission.Duplicate' in str(e):
+                logger.warning('[WARN] egress rule already exists')
+                return True
             logger.error(f'[FAIL] cannot authorize egress ({e})')
             return False
         logger.info(f'[SUCCESS] egress authorized')
@@ -335,3 +387,4 @@ class VPCSecurityManager(VPCSecurityInterface):
                 return True
             return False
         return True
+    
