@@ -16,7 +16,7 @@ class VPCSetupManager(VPCSetupInterface):
         Args:
             ec2_client: the injected EC2 client
         """
-        self.client = ec2_client.Vpc('id')
+        self.client = ec2_client
         self.cidr_block = '10.0.0.0/16'
         self.vpc_id = None
         self.dns = False # disabled
@@ -44,7 +44,8 @@ class VPCSetupManager(VPCSetupInterface):
             True/False to indicate success/failure
         """
         try:
-            self.client.modify_vpc_attribute(EnableDnsSupport=True)
+            self.client.modify_vpc_attribute(VpcId=self.vpc_id,
+                                             EnableDnsSupport={'Value': True})
         except ClientError as e:
             logger.error(f'[FAIL] cannot enable DNS support ({e})')
             return False
@@ -95,7 +96,7 @@ class VPCNetworkManager(VPCNetworkInterface):
             True/False to indicate success/failure
         """
         try:
-            self.client.modify_subnet_attribute(MapPublicIpOnLaunch=True,
+            self.client.modify_subnet_attribute(MapPublicIpOnLaunch={'Value': True},
                                                 SubnetId=self.subnet_id)
         except ClientError as e:
             logger.error(f'[FAIL] cannot auto-assign IP ({e})')
@@ -103,10 +104,11 @@ class VPCNetworkManager(VPCNetworkInterface):
         logger.info(f'[SUCCESS] auto-assigned IP')
         return True
 
-    def create_subnet(self, cidr_block: str) -> bool:
+    def create_subnet(self, cidr_block: str, subnet_name: str = 'MyPublicSubnet') -> bool:
         """Create public VPC subnet and enable auto_assigned IP
         Args:
             cidr_block: the CIDR block subset
+            subnet_name: the name for the subnet
         Docs:
             https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2/client/create_subnet.html
         Return:
@@ -118,7 +120,7 @@ class VPCNetworkManager(VPCNetworkInterface):
                                                  CidrBlock=cidr_block,
                                                  AvailabilityZone=self.availability_zone,
                                                  TagSpecifications=[{'ResourceType': 'subnet',
-                                                                     'Tags': [{'Key': 'Name', 'Value': 'MyPublicSubnet'}]}])
+                                                                     'Tags': [{'Key': 'Name', 'Value': subnet_name}]}])
         except ClientError as e:
             logger.error(f'[FAIL] cannot create subnet ({e})')
             return False
@@ -157,7 +159,10 @@ class VPCNetworkManager(VPCNetworkInterface):
             True/False to indicate success/failure
         """
         try:
-            response = self.client.create_internet_gateway(TagSpecifications=[{'ResourceType': 'internet-gateway'}])
+            response = self.client.create_internet_gateway(TagSpecifications=[{
+                                                                'ResourceType': 'internet-gateway',
+                                                                'Tags': [{'Key': 'Name', 'Value': 'MyInternetGateway'}]
+                                                            }])
         except ClientError as e:
             logger.error(f'[FAIL] cannot create internet gateway ({e})')
             return False
@@ -180,8 +185,11 @@ class VPCNetworkManager(VPCNetworkInterface):
             True/False to indicate success/failure
         """
         try:
-            response = self.client.create_route_table(TagSpecifications=[{'ResourceType': 'route-table'}],
-                                                      VpcId=self.vpc_id)
+            response = self.client.create_route_table(TagSpecifications=[{
+                                                            'ResourceType': 'route-table',
+                                                            'Tags': [{'Key': 'Name', 'Value': 'MyInternetGateway'}]
+                                                        }],
+                                                        VpcId=self.vpc_id)
         except ClientError as e:
             logger.error(f'[FAIL] cannot create route table ({e})')
             return False
@@ -244,18 +252,15 @@ class VPCNetworkManager(VPCNetworkInterface):
         logger.info(f'[SUCCESS] deleted route in the route table')
         return True
     
-    def associate_route_table(self, subnet_id: str) -> bool:
+    def associate_route_table(self) -> bool:
         """Associate subnet with route table in the VPC
         Docs:
             https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2/client/associate_route_table.html
-        Args:
-            subnet_id: the ID of the subnet
         Return:
             True/False to indicate success/failure
         """
         try:
-            self.client.associate_route_table(DryRun=True,
-                                              SubnetId=subnet_id,
+            self.client.associate_route_table(SubnetId=self.subnet_id,
                                               RouteTableId=self.route_table_id)
         except ClientError as e:
             logger.error(f'[FAIL] cannot associate subnet with the route table ({e})')
@@ -318,8 +323,7 @@ class VPCSecurityManager(VPCSecurityInterface):
         try:
             response = self.client.create_security_group(Description=self.description,
                                                          GroupName=self.group_name,
-                                                         VpcId=self.vpc_id,
-                                                         DryRun=True)
+                                                         VpcId=self.vpc_id)
         except ClientError as e:
             logger.error(f'[FAIL] cannot create security group ({e})')
             return False

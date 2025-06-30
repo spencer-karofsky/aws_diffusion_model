@@ -65,7 +65,7 @@ class VPCNetworkInterface(Protocol):
     def delete_route(self, destination_cidr: str) -> bool:
         raise NotImplementedError
     
-    def associate_route_table(self, subnet_id: str) -> bool:
+    def associate_route_table(self) -> bool:
         raise NotImplementedError
 
 class VPCSecurityInterface(Protocol):
