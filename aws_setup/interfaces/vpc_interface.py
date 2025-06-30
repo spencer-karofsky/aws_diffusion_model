@@ -21,7 +21,7 @@ Security Interface:
     - Define inbound rules. Defines who can reach the instance.
     - Define outbound rules. Defines who the instance can reach.
 """
-from typing import Protocol
+from typing import Protocol, List
 
 class VPCSetupInterface(Protocol):
     # Getter methods
@@ -57,6 +57,12 @@ class VPCNetworkInterface(Protocol):
         raise NotImplementedError
     
     def add_route(self, destination_cidr: str) -> bool:
+        raise NotImplementedError
+    
+    def list_routes(self) -> List[str]:
+        raise NotImplementedError
+    
+    def delete_route(self, destination_cidr: str) -> bool:
         raise NotImplementedError
     
     def associate_route_table(self, subnet_id: str) -> bool:
