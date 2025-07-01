@@ -23,7 +23,7 @@ Volume Manager (for integration with EBS):
 2. Attach Volume. Attaches a created EBS volume.
 3. Detach Volume. Detaches an EBS volume from an EC2 instance.
 """
-from typing import Protocol, List, Tuple
+from typing import Protocol, List, Dict
 
 class EC2InstancesInterface(Protocol):
     def launch_instance(self,
@@ -44,16 +44,13 @@ class EC2InstancesInterface(Protocol):
     def start_instance(self, instance_id: str) -> bool:
         raise NotImplementedError
     
-    def reboot_instance(self, instance_id: str) -> bool:
+    def reboot_instances(self, instance_ids: str) -> bool:
         raise NotImplementedError
     
-    def get_instance_status(self, instance_id: str) -> str:
+    def list_instance_statuses(self, instance_ids: str) -> Dict[str, str]:
         raise NotImplementedError
     
-    def list_instances(self) -> List[Tuple[str]]:
-        raise NotImplementedError
-    
-    def get_instance_public_ip(self, instance_id: str) -> str:
+    def list_instance_public_ips(self, instance_id: str) -> Dict[str, str]:
         raise NotImplementedError
 
 class EC2KeyPairInterface(Protocol):

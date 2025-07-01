@@ -360,11 +360,11 @@ class VPCSecurityManager(VPCSecurityInterface):
         return True
 
     def create_security_group(self, egress: bool = True) -> bool:
-        """Creates the security group with which to apply policies
+        """Creates the security group
         Docs:
             https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2/client/create_security_group.html
         Args:
-            egress: authorizes outbound traffic when enabled, such as for 
+            egress: authorizes outbound traffic when enabled
         Return:
             True/False to indicate success/failure
         """

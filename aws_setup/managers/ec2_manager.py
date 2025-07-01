@@ -6,7 +6,7 @@ from aws_setup.utils.logger import logger
 from aws_setup.interfaces.ec2_interface import EC2InstancesInterface, EC2KeyPairInterface, EC2SecurityInterface, EC2VolumeInterface
 from botocore.exceptions import ClientError
 from botocore.client import BaseClient
-from typing import Optional, List, Tuple
+from typing import List, Dict
 
 class EC2InstancesManager(EC2InstancesInterface):
     def __init__(self, ec2_client: BaseClient):
@@ -124,17 +124,69 @@ class EC2InstancesManager(EC2InstancesInterface):
         logger.info(f'[SUCCESS] started EC2 instances')
         return True
     
-    def reboot_instance(self, instance_id: str) -> bool:
-        raise NotImplementedError
+    def reboot_instances(self, instance_ids: str) -> bool:
+        """Reboot previously stopped EC2 instances
+        Docs:
+            https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2/client/reboot_instances.html
+        Args:
+            instance_ids: the EC2 instance IDs
+        Return:
+            True/False to indicate success/failure
+        """
+        try:
+            self.client.reboot_instances(InstanceIds=instance_ids)
+        except ClientError as e:
+            logger.error(f'[FAIL] cannot reboot EC2 instances ({e})')
+            return False
+        logger.info(f'[SUCCESS] rebooted EC2 instances')
+        return True
     
-    def get_instance_status(self, instance_id: str) -> str:
-        raise NotImplementedError
+    def list_instance_statuses(self, instance_ids: str) -> Dict[str, str]:
+        """Retrieve EC2 instance statuses
+        Docs:
+            https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2/client/describe_instance_status.html
+        Args:
+            instance_ids: the EC2 instance IDs
+        Return:
+            Dictionary of the form {'instance_id': 'status', ...}
+        """
+        try:
+            response = self.client.describe_instance_status(InstanceIds=instance_ids)
+        except ClientError as e:
+            logger.error(f'[FAIL] cannot describe EC2 instances ({e})')
+            return []
+
+        statuses_dict = {
+            instance_status['InstanceId']: instance_status['InstanceStatus']['Status']
+            for instance_status in response.get('InstanceStatuses', [])
+        }
+        logger.info(f'[SUCCESS] returned EC2 instance statuses')
+        return statuses_dict
     
-    def list_instances(self) -> List[Tuple[str]]:
-        raise NotImplementedError
-    
-    def get_instance_public_ip(self, instance_id: str) -> str:
-        raise NotImplementedError
+    def list_instance_public_ips(self, instance_ids: str) -> Dict[str, str]:
+        """Retrieve public IPs for EC2 instances
+        Docs:
+            https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2/client/describe_addresses.html
+        Args:
+            instance_ids: the EC2 instance IDs
+        Return:
+            Dictionary of the form {'instance_id': 'public_ip', ...}
+        """
+        try:
+            reservations = self.client.describe_instances(InstanceIds=instance_ids)['Reservations']
+        except ClientError as e:
+            logger.error(f'[FAIL] cannot describe instances ({e})')
+            return {}
+
+        result = {}
+        for reservation in reservations:
+            for instance in reservation['Instances']:
+                instance_id = instance['InstanceId']
+                public_ip = instance.get('PublicIpAddress')
+                if public_ip:
+                    result[instance_id] = public_ip
+
+        return result
 
 class EC2KeyPairManager(EC2KeyPairInterface):
     def __init__(self, ec2_client: BaseClient):
