@@ -1,10 +1,8 @@
 """
-Test EC2InstancesManager, EC2KeyPairManager, EC2SecurityManager, and EC2VolumeManager functionalities with moto
+Test EBSVolumeManager functionalities with moto
 (fake AWS calls that mimics boto3) and Python's unittest.
 """
 import boto3
-from aws_setup.managers.ec2_manager import EC2InstancesManager, EC2KeyPairManager, EC2VolumeManager
-from aws_setup.managers.vpc_manager import VPCSetupManager, VPCNetworkManager, VPCSecurityManager
 from aws_setup.managers.ebs_manager import EBSVolumeManager
 import unittest
 from moto import mock_ec2
