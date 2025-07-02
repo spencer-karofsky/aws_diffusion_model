@@ -1,12 +1,12 @@
 """
 Implements all EC2 functionalities.
 """
-import boto3
 from aws_setup.utils.logger import logger
-from aws_setup.interfaces.ec2_interface import EC2InstancesInterface, EC2KeyPairInterface, EC2SecurityInterface, EC2VolumeInterface
+from aws_setup.interfaces.ec2_interface import EC2InstancesInterface, EC2KeyPairInterface, EC2VolumeInterface
 from botocore.exceptions import ClientError
 from botocore.client import BaseClient
 from typing import List, Dict
+import os
 
 class EC2InstancesManager(EC2InstancesInterface):
     def __init__(self, ec2_client: BaseClient):
@@ -190,30 +190,102 @@ class EC2InstancesManager(EC2InstancesInterface):
 
 class EC2KeyPairManager(EC2KeyPairInterface):
     def __init__(self, ec2_client: BaseClient):
-        pass
+        """Initialize EC2 shared resources
+        Args:
+            ec2_client: the EC2 client
+        """
+        self.client = ec2_client
 
-    def create_key_pair(self, destination_path: str) -> bool:
-        raise NotImplementedError
+    def create_key_pair(self, key_name: str) -> bool:
+        """Create a key for access into an EC2 instance
+        Docs:
+            https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2/client/create_key_pair.html
+        Args:
+            key_name: the key name
+        Return:
+            True/False to indicate success/failure
+        """
+        try:
+            response = self.client.create_key_pair(KeyName=key_name)
+        except ClientError as e:
+            logger.error(f'[FAIL] cannot generate private key ({e})')
+            return False
+        private_key = response['KeyMaterial']
+
+        # Save key
+        key_path = os.path.expanduser(f'~/.ssh/{key_name}.pem')
+        os.makedirs(os.path.dirname(key_path), exist_ok=True)
+        with open(key_path, 'w') as key_file:
+            key_file.write(private_key)
+
+        os.chmod(key_path, 0o400) # Make read only for SSH
+        
+        logger.info(f'[SUCCESS] generated private key')
+        return True
     
     def delete_key_pair(self, key_name: str) -> bool:
-        raise NotImplementedError
-
-class EC2SecurityManager(EC2SecurityInterface):
-    def __init__(self, ec2_client: BaseClient):
-        pass
-
-    def assign_security_group(self, sg: str) -> bool:
-        raise NotImplementedError
-    
-    def describe_security_group(self, sg: str) -> bool:
-        raise NotImplementedError
+        """Delete key pair
+        Docs:
+            https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2/client/delete_key_pair.html
+        Args:
+            key_name: the key name
+        Return:
+            True/False to indicate success/failure
+        """
+        try:
+            response = self.client.delete_key_pair(KeyName=key_name)
+        except ClientError as e:
+            logger.error(f'[FAIL] cannot delete private key ({e})')
+            return False
+        # Verify the key was deleted
+        if response['Return']:
+            logger.info(f'[SUCCESS] deleted private key')
+            return True
+        logger.error(f'[FAIL] cannot delete private key ({e})')
+        return False
 
 class EC2VolumeManager(EC2VolumeInterface):
     def __init__(self, ec2_client: BaseClient):
-        pass
+        """Initialize EC2 shared resources
+        Args:
+            ec2_client: the EC2 client
+        Return:
+            True/False to indicate success/failure
+        """
+        self.client = ec2_client
 
-    def attach_volume(self, volume_id: str, device_name: str) -> bool:
-        raise NotImplementedError
+    def attach_volume(self, instance_id: str, volume_id: str, device_name: str) -> bool:
+        """Attach EBS volume to EC2 instance
+        Docs:
+            https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2/client/attach_volume.html
+        Args:
+            instance_id: the EC2 instance ID
+            volume_id: the EBS volume ID
+            device_name: the device name of the volume
+        """
+        try:
+            self.client.attach_volume(Device=device_name,
+                                      InstanceId=instance_id,
+                                      VolumeId=volume_id)
+        except ClientError as e:
+            logger.error(f'[FAIL] cannot attach EBS volume ({e})')
+            return False
+        logger.info(f'[SUCCESS] attached EBS volume')
+        return True
     
     def detach_volume(self, volume_id: str) -> bool:
-        raise NotImplementedError
+        """Detach an EBS volume
+        Docs:
+            https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2/client/delete_volume.html
+        Args:
+            volume_id: the EBS volume ID
+        Return:
+            True/False to indicate success/failure
+        """
+        try:
+            self.client.delete_volume(VolumeId=volume_id)
+        except ClientError as e:
+            logger.error(f'[FAIL] cannot detach EBS volume ({e})')
+            return False
+        logger.info(f'[SUCCESS] detached EBS volume')
+        return True

@@ -54,21 +54,14 @@ class EC2InstancesInterface(Protocol):
         raise NotImplementedError
 
 class EC2KeyPairInterface(Protocol):
-    def create_key_pair(self, destination_path: str) -> bool:
+    def create_key_pair(self, key_name: str) -> bool:
         raise NotImplementedError
     
     def delete_key_pair(self, key_name: str) -> bool:
         raise NotImplementedError
 
-class EC2SecurityInterface(Protocol):
-    def assign_security_group(self, sg: str) -> bool:
-        raise NotImplementedError
-    
-    def describe_security_group(self, sg: str) -> bool:
-        raise NotImplementedError
-
 class EC2VolumeInterface(Protocol):
-    def attach_volume(self, volume_id: str, device_name: str) -> bool:
+    def attach_volume(self, instance_id: str, volume_id: str, device_name: str) -> bool:
         raise NotImplementedError
     
     def detach_volume(self, volume_id: str) -> bool:
