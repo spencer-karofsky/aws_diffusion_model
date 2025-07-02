@@ -1,5 +1,5 @@
 """
-Defines interfaces for all Amazon Virtual Private Cloud (VPC) Functionalities.
+Defines interfaces for all Amazon Elastic Compute Cloud (EC2) Functionalities.
 
 Instances Manager:
 1. Launch instance. Creates a new EC2 instance.

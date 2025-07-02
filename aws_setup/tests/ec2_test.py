@@ -5,6 +5,7 @@ Test EC2InstancesManager, EC2KeyPairManager, EC2SecurityManager, and EC2VolumeMa
 import boto3
 from aws_setup.managers.ec2_manager import EC2InstancesManager, EC2KeyPairManager, EC2VolumeManager
 from aws_setup.managers.vpc_manager import VPCSetupManager, VPCNetworkManager, VPCSecurityManager
+from aws_setup.managers.ebs_manager import EBSVolumeManager
 import unittest
 from moto import mock_ec2
 
@@ -226,6 +227,23 @@ class EC2VolumeManagerTest(unittest.TestCase):
         self.image_id = 'ami-0a7d80731ae1b2435' # Free tier-eligible
         self.instance_type = 't2.micro' # Free tier-eligble, so optimal for testing, but use more powerful paid instance type for production
 
+        # Set up subnet and security group
+        self._setup_network_sg()
+
+        # Create EBS volume
+        ebs_volume_manager = EBSVolumeManager(self.client)
+        ebs_volume_manager.create_volume(availability_zone='us-east-1a',
+                                         size=5,
+                                         volume_type='gp2',
+                                         volume_name='my-ebs-volume')
+        self.volume_id = ebs_volume_manager.volume_ids[0]
+
+        # Create key pair
+        ec2_key_pair_manager = EC2KeyPairManager(self.client)
+
+        self.key_pair_name = 'my-key'
+        self.key_pair = ec2_key_pair_manager.create_key_pair(self.key_pair_name)
+
     def tearDown(self):
         """Stop mocking resources
         """
@@ -234,16 +252,19 @@ class EC2VolumeManagerTest(unittest.TestCase):
     def test_attach_volume(self):
         """Test EC2VolumeManager.attach_volume
         """
-        ec2_instance = self.ec2_instances_manager.launch_instance()
-        instance_id = self.ec2_instances_manager.instances[0]['InstanceId'] 
-        volume_id = '' # TODO
-        device_name = '' # TODO
+        self.ec2_instances_manager.launch_instance('my-ec2-instance',
+                                                   self.image_id,
+                                                   self.instance_type,
+                                                   self.subnet_id,
+                                                   self.key_pair_name,
+                                                   [self.security_id])
+        instance_id = self.ec2_instances_manager.instances[0]['InstanceId']
+        device_name = '/dev/sdf'
         self.assertTrue(self.ec2_volume_manager.attach_volume(instance_id=instance_id,
-                                                              volume_id=volume_id,
-                                                              device_name=''))
+                                                              volume_id=self.volume_id,
+                                                              device_name=device_name))
     
     def test_detach_volume(self):
         """Test EC2VolumeManager.detach_volume
         """
-        volume_id = '' # TODO
-        self.assertTrue(self.ec2_volume_manager.detach_volume(volume_id=volume_id))
+        self.assertTrue(self.ec2_volume_manager.detach_volume(volume_id=self.volume_id))

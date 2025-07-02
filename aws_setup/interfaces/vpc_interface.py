@@ -77,11 +77,11 @@ class VPCSecurityInterface(Protocol):
     def _authorize_all_egress(self) -> bool:
         raise NotImplementedError
     
-    def create_security_group(self, egress: bool) -> bool:
+    def _authorize_all_ingress(self) -> bool:
         raise NotImplementedError
     
-    # def authorize_ssh(self) -> bool: # Implement if needed
-    #     raise NotImplementedError
+    def create_security_group(self, egress: bool = True, ssh: bool = True) -> bool:
+        raise NotImplementedError
         
-    # def authorize_http_https(self) -> bool:
+    # def authorize_http_https(self) -> bool:  # Implement if needed
     #     raise NotImplementedError

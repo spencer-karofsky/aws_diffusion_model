@@ -7,6 +7,7 @@ from botocore.exceptions import ClientError
 from botocore.client import BaseClient
 from typing import List, Dict
 import os
+import tempfile
 
 class EC2InstancesManager(EC2InstancesInterface):
     def __init__(self, ec2_client: BaseClient):
@@ -29,6 +30,11 @@ class EC2InstancesManager(EC2InstancesInterface):
             https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2/client/run_instances.html
         Args:
             instance_name: the display name for the instance (separate from the generated instance ID)
+            image_id: the runtime environment/OS of the instance
+            instance_type: the performance class (use t2.micro for testing)
+            subnet_id: the subnet ID, created in VPC functionality
+            key_name: the key name of the already created key pair (must create key pair) first
+            security_group_ids: list of security group policies to apply to instance
         Return:
             True/False to indicate success/failure
         """
@@ -210,17 +216,19 @@ class EC2KeyPairManager(EC2KeyPairInterface):
         except ClientError as e:
             logger.error(f'[FAIL] cannot generate private key ({e})')
             return False
+
         private_key = response['KeyMaterial']
 
-        # Save key
-        key_path = os.path.expanduser(f'~/.ssh/{key_name}.pem')
-        os.makedirs(os.path.dirname(key_path), exist_ok=True)
-        with open(key_path, 'w') as key_file:
-            key_file.write(private_key)
+        try:
+            with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix=".pem") as key_file:
+                key_file.write(private_key)
+                key_path = key_file.name
+            os.chmod(key_path, 0o400)
+        except Exception as e:
+            logger.error(f'[FAIL] could not save key to temp file ({e})')
+            return False
 
-        os.chmod(key_path, 0o400) # Make read only for SSH
-        
-        logger.info(f'[SUCCESS] generated private key')
+        logger.info(f'[SUCCESS] generated private key at {key_path}')
         return True
     
     def delete_key_pair(self, key_name: str) -> bool:

@@ -358,8 +358,42 @@ class VPCSecurityManager(VPCSecurityInterface):
             return False
         logger.info(f'[SUCCESS] egress authorized')
         return True
+    
+    def _authorize_all_ingress(self) -> bool:
+        """Authorize SSH (for login via a key pair)
+        Docs:
+            https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2/client/authorize_security_group_ingress.html
+        Return:
+            True/False to indicate success/failure
+        """
+        try:
+            self.client.authorize_security_group_ingress(
+                GroupId=self.security_group_id,
+                IpPermissions=[
+                    {
+                        'IpProtocol': 'tcp',
+                        'FromPort': 22,
+                        'ToPort': 22,
+                        'IpRanges': [
+                            {
+                                'CidrIp': '0.0.0.0/0',
+                                'Description': 'Allow SSH access from anywhere'
+                            }
+                        ]
+                    }
+                ]
+            )
+        except ClientError as e:
+            if 'InvalidPermission.Duplicate' in str(e):
+                logger.warning('[WARN] ingress rule already exists')
+                return True
+            logger.error(f'[FAIL] could not authorize SSH ingress ({e})')
+            return False
+        logger.info('[SUCCESS] authorized SSH ingress on port 22')
+        return True
 
-    def create_security_group(self, egress: bool = True) -> bool:
+
+    def create_security_group(self, egress: bool = True, ssh: bool = True) -> bool:
         """Creates the security group
         Docs:
             https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2/client/create_security_group.html
@@ -379,6 +413,11 @@ class VPCSecurityManager(VPCSecurityInterface):
         self.security_group_id = response['GroupId']
         if egress:
             status = self._authorize_all_egress()
+            if status:
+                return True
+            return False
+        if ssh:
+            status = self._authorize_all_ingress()
             if status:
                 return True
             return False
