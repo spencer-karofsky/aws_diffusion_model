@@ -204,6 +204,8 @@ class S3ObjectManager(S3ObjectInterface):
             https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/s3/client/list_objects.html
         Args:
             bucket_name: the S3 Bucket name
+        Return:
+            List of tuples of the form [(object name/key, last modified date and time, object size in MB), ...]
         """
         try:
             response = self._client.list_objects_v2(Bucket=bucket_name)
