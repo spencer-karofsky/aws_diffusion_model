@@ -16,8 +16,8 @@ if __name__ == "__main__":
 
     # Create S3 buckets
     s3_buckets = ['ddpm-project-data',
-                    'ddpm-project-models',
-                    'ddpm-project-outputs']
+                  'ddpm-project-models',
+                  'ddpm-project-outputs']
     
     for name in s3_buckets:
         bucket_manager.create_bucket(name)

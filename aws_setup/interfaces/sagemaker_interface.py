@@ -43,7 +43,8 @@ class SageMakerDataInterface(Protocol):
                       local_dir: str,
                       bucket: str,
                       prefix: str,
-                      n_samples: Optional[int] = 100) -> bool:
+                      n_samples: Optional[int] = 100,
+                      skip_notebook_check: bool = False) -> bool:
         raise NotImplementedError
     
     def visualize_samples(self) -> bool:
@@ -65,5 +66,6 @@ class SageMakerTrainingInterface(Protocol):
     
     def train(self,
               epochs: int,
+              model_bucket: str,
               resume_from: Optional[str] = None) -> bool:
         raise NotImplementedError
