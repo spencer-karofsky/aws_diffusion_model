@@ -5,8 +5,6 @@ import boto3
 from aws_setup.managers.iam_manager import IAMRoleManager
 import unittest
 from moto import mock_iam
-import os
-import tempfile
 
 class IAMRoleManagerTest(unittest.TestCase):
     def _create_role(self) -> bool:
