@@ -239,9 +239,12 @@ class SageMakerDataManagerTest(unittest.TestCase):
 
     @patch.object(SageMakerNotebookManager, "get_notebook_status", return_value="InService")
     def test_validate_data(self, mock_status):
-        """Test SageMakerDataManager.validate_data"""
+        """Test SageMakerDataManager.validate_data
+        """
+        # Make temporary directory
         download_dir = tempfile.mkdtemp()
 
+        # Download data
         self.sagemaker_data_manager.download_data(
             local_dir=download_dir,
             bucket=self.bucket_name,
@@ -258,6 +261,8 @@ class SageMakerDataManagerTest(unittest.TestCase):
 
 class SageMakerTrainingManagerTest(unittest.TestCase):
     def setUp(self):
+        """Set up testing resources
+        """
         X = torch.randn(20, 10)
         y = torch.randn(20, 1)
         dataset = TensorDataset(X, y)
@@ -267,7 +272,7 @@ class SageMakerTrainingManagerTest(unittest.TestCase):
         self.optimizer = optim.SGD(self.model.parameters(), lr=0.01)
         self.loss_fn = nn.MSELoss()
 
-        # Mock S3 manager with required methods
+        # Mock S3 manager
         self.s3_object_manager = MagicMock()
         self.s3_object_manager.upload_file = MagicMock(return_value=True)
         self.s3_object_manager.download_file = MagicMock(return_value=True)
@@ -286,6 +291,8 @@ class SageMakerTrainingManagerTest(unittest.TestCase):
 
     @patch("torch.save")
     def test_save_checkpoint(self, mock_save):
+        """Test SageMakerTrainingInterface._save_checkpoint
+        """
         with tempfile.NamedTemporaryFile() as tmp:
             result = self.manager._save_checkpoint("my-bucket", tmp.name)
             mock_save.assert_called_once()
@@ -294,6 +301,8 @@ class SageMakerTrainingManagerTest(unittest.TestCase):
 
     @patch("torch.load")
     def test_load_checkpoint(self, mock_load):
+        """Test SageMakerTrainingInterface._load_checkpoint
+        """
         mock_load.return_value = self.model.state_dict()
         self.s3_object_manager.download_file.return_value = True
 
@@ -301,38 +310,22 @@ class SageMakerTrainingManagerTest(unittest.TestCase):
         self.s3_object_manager.download_file.assert_called_once()
         self.assertTrue(result)
 
-    def test_train_basic(self):
-        # Run a short train loop and assert success
-        result = self.manager.train(epochs=1, model_bucket="unused")
-        self.assertTrue(result)
+    def test_train(self):
+        """Test SageMakerTrainingInterface.train
+        """
+        self.assertTrue(
+            self.manager.train(epochs=1, model_bucket="unused")
+        )
 
     @patch.object(SageMakerTrainingManager, "_load_checkpoint")
     def test_train_resume_from(self, mock_load):
         result = self.manager.train(epochs=1, model_bucket="bucket", resume_from="checkpoint.pt")
         mock_load.assert_called_once_with(bucket="bucket", save_name="checkpoint.pt")
         self.assertTrue(result)
-
-    # @patch("torch.save", side_effect=Exception("save failed"))
-    # def test_save_checkpoint_failure(self, mock_save):
-    #     result = self.manager._save_checkpoint("bucket", "model.pt")
-    #     self.assertFalse(result)
-
-    # @patch("torch.load", side_effect=Exception("load failed"))
-    # def test_load_checkpoint_failure(self, mock_load):
-    #     result = self.manager._load_checkpoint("bucket", "model.pt")
-    #     self.assertFalse(result)
-
-    # @patch("builtins.print")
-    # def test_train_with_exception(self, mock_print):
-    #     # Break model forward pass
-    #     self.manager.model.forward = MagicMock(side_effect=Exception("bad forward"))
-    #     result = self.manager.train(epochs=1, model_bucket="bucket")
-    #     self.assertFalse(result)
-    #     self.assertIn(call('[ERROR] Training failed: bad forward'), mock_print.mock_calls)
     
 class DummyModel(nn.Module):
     def __init__(self):
-        """Setup dummy Neural Network to train
+        """Dummy Neural Network to train
         """
         super().__init__()
         self.linear = nn.Linear(10, 1)
