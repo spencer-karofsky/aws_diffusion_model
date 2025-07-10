@@ -41,9 +41,9 @@ import torch.nn.functional as F
 # ----------------------------------------
 # Utility Blocks
 # ----------------------------------------
-class SinusodalPosEmb(nn.Module):
+class SinusoidalPosEmb(nn.Module):
     def __init__(self, dim: int = 512):
-        """Defines Sinusodal Positional Embedding
+        """Defines Sinusoidal Positional Embedding
         This process is explained in detail in my notes on Positional Encoding:
             - https://github.com/spencer-karofsky/aws_diffusion_model/blob/main/dall-e-2/notes/Attention%20is%20All%20You%20Need.pdf
         Args:
@@ -83,14 +83,14 @@ class SinusodalPosEmb(nn.Module):
 
 class TimeEmbedding(nn.Module):
     def __init__(self, dim: int):
-        """Wraps Sinusodal embedding + MLP projection for timestep conditioning.
+        """Wraps Sinusoidal embedding + MLP projection for timestep conditioning.
         Process is described in Position-Wise FFN section:
             -https://github.com/spencer-karofsky/aws_diffusion_model/blob/main/dall-e-2/notes/Attention%20is%20All%20You%20Need.pdf
         Args:
             dim: the dimensionality of the embedding (use 512 for DALL·E 2)
         """
         super().__init__()
-        self.embed = SinusodalPosEmb(dim)
+        self.embed = SinusoidalPosEmb(dim)
         self.mlp = nn.Sequential(
             nn.Linear(dim, dim * 4),
             nn.SiLU(),  # Uses SiLU instead of ReLU, as SiLU is slightly better for Diffusion
