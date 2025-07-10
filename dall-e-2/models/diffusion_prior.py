@@ -32,15 +32,17 @@ Description and Purpose:
     - The diffusion prior is explained in the paper, and in my notes: https://github.com/spencer-karofsky/aws_diffusion_model/blob/main/dall-e-2/notes/DALL-E-2%202022.pdf
 
 Usage:
-    TODO
+    from diffusion_prior import DiffusionPrior
+    diffusion_prior = DiffusionPrior()
+    # text embeddings, timestep embeddings, and noised image embeddings: defined tensors
+    clip_img_emb = diffusion_prior(txt_emb, timestep_emb, noisy_img_emb)
 
-Classes:
-    TODO
+Class:
+    - DiffusionPrior: The first half of DALL·E 2 that generates the CLIP image embedding given the text
 
 Author:
     - Spencer Karofsky (https://github.com/spencer-karofsky)
 """
-import math
 import torch
 import torch.nn as nn
 from typing import List
@@ -99,8 +101,6 @@ class DiffusionPrior(nn.Module):
         Returns:
             the fully de-noised CLIP image embedding (of the same dimensionality as the CLIP text embedding input)
         """
-        B = text_embedding.shape[0]
-
         # Expand the three tensors so they match the expected dimensions: [B, 1, 512]
         text_embedding = text_embedding.unsqueeze(1) # 1 specifies to add the extra dimension at axis 1
         timestep_embedding = timestep_embedding.unsqueeze(1)
