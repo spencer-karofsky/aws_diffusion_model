@@ -20,3 +20,5 @@ Classes:
 Author:
     - Spencer Karofsky (https://github.com/spencer-karofsky)
 """
+import torch
+import torch.nn as nn
