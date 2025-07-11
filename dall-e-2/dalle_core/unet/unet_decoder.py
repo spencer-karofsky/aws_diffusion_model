@@ -310,16 +310,14 @@ class UNetDownsamplingBlock(nn.Module):
         """
         skips = []
         for block in self.blocks:
-            # Some blocks (like ResBlock) take t_emb
             if isinstance(block, ResBlock):
                 x = block(x, t_emb)
-                skips.append(x)  # store skip connection
+                skips.append(x)
             elif isinstance(block, AttentionBlock):
                 x = block(x)
             else:  # Downsample
                 x = block(x)
-
-        return skips
+        return skips, x
 
 class UNetBottleneckBlock(nn.Module):
     def __init__(
@@ -523,10 +521,10 @@ class UNetDenoiser(nn.Module):
         Returns:
             Predicted noise [B, C, H, W]
         """
-        t_emb = self.time_embedding(t)        # [B, time_emb_dim]
-        skips = self.down(x, t_emb)           # List of skip connections
-        x = self.bottleneck(skips[-1], t_emb) # Pass last downsampled tensor through bottleneck
-        x = self.up(x, skips[:-1][::-1], t_emb)  # Reverse skips for proper fusion
+        t_emb = self.time_embedding(t) # gets the time embedding [B, time_emb_dim]
+        skips, x = self.down(x, t_emb) # downsample x
+        x = self.bottleneck(x, t_emb)
+        x = self.up(x, skips[::-1], t_emb)
 
         x = self.final_norm(x)
         x = self.final_act(x)
