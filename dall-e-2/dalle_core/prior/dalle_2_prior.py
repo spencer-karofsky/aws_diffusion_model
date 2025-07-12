@@ -1,5 +1,5 @@
 """
-diffusion_prior: implements the diffusion prior integral to the DALL·E 2 paper: https://cdn.openai.com/papers/dall-e-2.pdf
+dalle_2_prior: implements the diffusion prior integral to the DALL·E 2 paper: https://cdn.openai.com/papers/dall-e-2.pdf
 
 Description and Purpose:
     - There are two components/models in DALL·E 2 that work together:
@@ -32,10 +32,10 @@ Description and Purpose:
     - The diffusion prior is explained in the paper, and in my notes: https://github.com/spencer-karofsky/aws_diffusion_model/blob/main/dall-e-2/notes/DALL-E-2%202022.pdf
 
 Usage:
-    from diffusion_prior import DiffusionPrior
-    diffusion_prior = DiffusionPrior()
+    from dalle_2_prior import DALLE2Prior
+    prior = DALLE2Prior()
     # text embeddings, timestep embeddings, and noised image embeddings: defined tensors
-    clip_img_emb = diffusion_prior(txt_emb, timestep_emb, noisy_img_emb)
+    clip_img_emb = prior.forward(txt_emb, timestep_emb, noisy_img_emb)
 
 Class:
     - DiffusionPrior: The first half of DALL·E 2 that generates the CLIP image embedding given the text
@@ -45,8 +45,7 @@ Author:
 """
 import torch
 import torch.nn as nn
-from typing import List
-import torch.nn.functional as F
+from dalle_core.unet.unet import TimeEmbedding
 
 class DiffusionPrior(nn.Module):
     def __init__(
@@ -64,6 +63,8 @@ class DiffusionPrior(nn.Module):
         super().__init__()
         
         self.dim = n_dim
+
+        self.time_embedding = TimeEmbedding(self.dim)
 
         # Initializes learned parameters for positional embedding, since the Transformer needs positional embedding
         self.positional_embedding = nn.Parameter(torch.randn(1, 3, self.dim))
@@ -90,34 +91,43 @@ class DiffusionPrior(nn.Module):
     def forward(
             self,
             text_embedding: torch.Tensor,
-            timestep_embedding: torch.Tensor,
+            timestep: torch.Tensor,
             noised_image_embedding: torch.Tensor
         ) -> torch.Tensor:
-        """Generates the CLIP image embedding given a text caption/prompt (CLIP-embedded)
-        Args:
-            text_embedding: the CLIP text embedding, capturing a global context, of shape [B, 512]
-            timestep_embedding: the sinusoidal timestep embedding, of shape [B, 512]
-            noised_image_embedding: the CLIP embedding of the noisy (intermediate) target output
-        Returns:
-            the fully de-noised CLIP image embedding (of the same dimensionality as the CLIP text embedding input)
         """
-        # Expand the three tensors so they match the expected dimensions: [B, 1, 512]
-        text_embedding = text_embedding.unsqueeze(1) # 1 specifies to add the extra dimension at axis 1
+        Args:
+            text_embedding: [B, 512]
+            timestep_embedding: [B, 512]
+            noised_image_embedding: [B, 512]
+        Returns:
+            denoised_image_embed: [B, 512]
+        """
+        # B = text_embedding.size(0)
+        # Expand to [B, 1, 512]
+        text_embedding = text_embedding.unsqueeze(1)
+        timestep_embedding = self.time_embedding(timestep)  # [B, 512]
         timestep_embedding = timestep_embedding.unsqueeze(1)
+
         noised_image_embedding = noised_image_embedding.unsqueeze(1)
 
-        # Concatenate the input sequence, so that we can pass into the transformer
-        transformer_input = torch.cat([text_embedding,
-                                       timestep_embedding,
-                                       noised_image_embedding], axis=1) # outputs shape [B, 3, 512]
-        
-        # Add (learned) positional context to the Transformer input
+        # Concatenate into sequence: [B, 3, 512]
+        transformer_input = torch.cat([
+            text_embedding,
+            timestep_embedding,
+            noised_image_embedding
+        ], dim=1)
+
+        # Add learned positional embedding
         transformer_input = transformer_input + self.positional_embedding
 
-        # Pass through the decoder-only Transformer to update these values by using self-attention
-        transformer_output = self.transformer(transformer_input) # Outputs the same tensor shape [B, 3, 512]
+        # Causal mask (allow attending to current and past tokens)
+        seq_len = transformer_input.size(1)
+        causal_mask = torch.triu(torch.ones(seq_len, seq_len, device=transformer_input.device) * float('-inf'), diagonal=1)
 
-        # Get the last token's noised image embedding of the three tokens (we have B sequences of three tokens of 512-dimensionality)
-        denoised_image_embed = self.output_network(transformer_output[:, -1, :]) # only passes in the last token
+        # Transformer forward pass with causal mask
+        transformer_output = self.transformer(transformer_input, mask=causal_mask)
+
+        # Predict final denoised CLIP image embedding from last token
+        denoised_image_embed = self.output_network(transformer_output[:, -1, :])  # [B, 512]
 
         return denoised_image_embed

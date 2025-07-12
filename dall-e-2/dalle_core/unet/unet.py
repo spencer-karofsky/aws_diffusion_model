@@ -1,33 +1,36 @@
 """
-unet: Implements U-Net architecture, modified from the 2015 paper: https://arxiv.org/abs/1505.04597
+unet: Implements U-Net architecture, modified from the 2015 paper.
 
 Description and Purpose:
     - The DDPM and DDIM are both implemented using U-Net (and these diffusion models are used in DALL·E 2):
     - The U-Net learns to predict noise for both models.
-        - Takes in a noisy image and time step (embedded)
+        - Takes in a noisy image, a time step (embedded), and the text (CLIP-embedded)
         - Outputs predicted noise
     - The U-Net is Called Once per Time Step for both Models.
-    - U-Net Notes: https://github.com/spencer-karofsky/aws_diffusion_model/blob/main/dall-e-2/notes/U-net%202015.pdf
 
 Usage:
     from models.decoder.unet import UNetDenoiser
-    model = UNetDenoiser(...)
-    predicted_noise = model(x_t, t)
+    unet = UNetDenoiser(...)
+    predicted_noise = unet.forward(x_t, t, text_embed)
 
 Classes:
-    * Utility
+    - Utility
         - Time Embedding: Applies Time Step Embedding
             - SinusodalPosEmb: Applies Sinusodal Postional Embedding
         - ResBlock: Defines a ResBlock from ResNet
         - AttentionBlock: Includes Attention Mechanism
-    * Core
+    - Core
         - UNetDownsamplingBlock: Performs the downsampling process of the U-Net
             - Downsample: Individual downsampling operation
         - UNetBottleneckBlock: Performs the bottleneck process of the U-Net
         - UNetUpsamplingBlock: Performs the upsampling process of the U-Net
             - Upsample: Individual upsampling operation
-    * Main U-Net Denoiser
+    - Main U-Net Denoiser
         - UNetDenoiser: Combines all of the core blocks for one unified U-Net Denoising process
+
+References:
+    - U-Net Paper: https://arxiv.org/abs/1505.04597
+    - My U-Net Notes: https://github.com/spencer-karofsky/aws_diffusion_model/blob/main/dall-e-2/research_notes/U-net%202015.pdf or /dall-e-2/research_notes/U-net 2015.pdf
 
 Author:
     - Spencer Karofsky (https://github.com/spencer-karofsky)
@@ -231,6 +234,7 @@ class Downsample(nn.Module):
         Args:
             channels: number of input and output channels
         """
+        super().__init__()
         self.op = nn.Conv2d(
             in_channels=channels,
             out_channels=channels,
@@ -474,7 +478,7 @@ class UNetDenoiser(nn.Module):
             out_channels: Number of channels in the predicted output (e.g., 3 for RGB noise)
             base_channels: Number of base channels used to scale the model width
             channel_multipliers: List of multipliers for each resolution level
-            time_emb_dim: Dimensionality of the time embedding vector
+            time_emb_dim: Dimensionality of the time embedding vector (also for text embedding)
             attention_resolutions: Resolutions at which to apply attention
             image_size: Size of the input image (assumed square)
             num_res_blocks: Number of residual blocks per resolution level
@@ -482,6 +486,8 @@ class UNetDenoiser(nn.Module):
         super().__init__()
 
         self.time_embedding = TimeEmbedding(time_emb_dim)
+
+        self.text_proj = nn.Linear(512, time_emb_dim)
 
         self.down = UNetDownsamplingBlock(
             in_channels=in_channels,
@@ -513,18 +519,27 @@ class UNetDenoiser(nn.Module):
         self.final_act = nn.SiLU()
         self.final_conv = nn.Conv2d(base_channels, out_channels, kernel_size=3, padding=1)
 
-    def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+    def forward(
+            self,
+            x: torch.Tensor,
+            t: torch.Tensor,
+            text_embed: torch.Tensor
+        ) -> torch.Tensor:
         """
         Args:
-            x: Noisy input image [B, C, H, W]
-            t: Timestep [B]
+            x: Noisy input image (shape=[B, C, H, W])
+            t: Timestep (shape=[B])
+            text_embed: CLIP text embedding (shape = [B, 512])
         Returns:
             Predicted noise [B, C, H, W]
         """
-        t_emb = self.time_embedding(t) # gets the time embedding [B, time_emb_dim]
-        skips, x = self.down(x, t_emb) # downsample x
-        x = self.bottleneck(x, t_emb)
-        x = self.up(x, skips[::-1], t_emb)
+        t_emb = self.time_embedding(t)                  # [B, time_emb_dim]
+        text_cond = self.text_proj(text_embed)          # [B, time_emb_dim]
+        cond_emb = t_emb + text_cond                    # Combine conditioning
+
+        skips, x = self.down(x, cond_emb)
+        x = self.bottleneck(x, cond_emb)
+        x = self.up(x, skips[::-1], cond_emb)
 
         x = self.final_norm(x)
         x = self.final_act(x)

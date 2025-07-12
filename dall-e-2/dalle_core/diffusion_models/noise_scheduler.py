@@ -86,32 +86,29 @@ class NoiseScheduler:
         # Define all alpha_bars, using vectorized approach for speed
         self.alpha_bars = torch.cumprod(self.alphas, dim=0)
     
-    def get_beta(self, t: int) -> float:
+    def get_beta(self, t: torch.Tensor) -> torch.Tensor:
         """Looks-up beta value at timestep t
         Args:
-            t: the timestep
+            t: the timesteps
         Returns:
-            beta_t
+            beta_ts
         """
-        assert t < self.T
         return self.betas[t]
     
-    def get_alpha(self, t: int) -> float:
+    def get_alpha(self, t: torch.Tensor) -> torch.Tensor:
         """Looks-up alpha value at timestep t
         Args:
-            t: the timestep
+            t: the timesteps
         Returns:
-            alpha_t
+            alpha_ts
         """
-        assert t < self.T
         return self.alphas[t]
     
-    def get_alpha_bar(self, t: int) -> float:
+    def get_alpha_bar(self, t: torch.Tensor) -> torch.Tensor:
         """Looks-up alpha_bar value at timestep t
         Args:
-            t: the timestep
+            t: the timesteps
         Returns:
-            alpha_bar_t
+            alpha_bar_ts
         """
-        assert t < self.T
         return self.alpha_bars[t]
