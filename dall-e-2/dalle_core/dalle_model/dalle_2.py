@@ -43,12 +43,9 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from typing import List
 
-from tqdm import tqdm
-
 from dalle_core.prior.dalle_2_prior import DiffusionPrior
 from dalle_core.decoder.dalle_2_decoder import Decoder
 from dalle_core.clip.clip_embedder import CLIPEmbedder
-
 
 from data.dataset_utils import BaseDataset
 
@@ -57,9 +54,6 @@ class DALLE2(nn.Module):
     def __init__(
         self,
         dataset: BaseDataset,
-        optimizer: torch.optim.Optimizer,
-        batch_size: int = 32,
-        num_epochs: int = 10,
         device: str = 'cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu'
     ):
         """
@@ -88,7 +82,11 @@ class DALLE2(nn.Module):
 
         self.clip_embedder = CLIPEmbedder()
     
-    def forward(self, captions: List[str], deterministic: bool = False) -> torch.Tensor:
+    def forward(
+            self,
+            captions: List[str],
+            deterministic: bool = False
+        ) -> torch.Tensor:
         """
         Inference: captions → generated images.
         Args:

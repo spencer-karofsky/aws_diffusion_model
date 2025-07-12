@@ -20,7 +20,9 @@ import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 import torch.nn.functional as F
+import torch.optim as optim
 from dalle_core.dalle_model.dalle_2 import DALLE2
+from data.dataset_utils import MidjourneyDataset
 
 class DALLETrainer:
     def __init__(
@@ -33,6 +35,9 @@ class DALLETrainer:
         num_epochs: int = 10,
         device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
     ):
+        """Initializes the DALL·E 2 trainer
+        
+        """
         self.dalle = dalle_model
         self.clip = clip_embedder
         self.scheduler = noise_scheduler
@@ -93,6 +98,8 @@ class DALLETrainer:
         return True
 
 if __name__ == "__main__":
-    dalle = DALLE2
+    dataset = MidjourneyDataset()
+    optimizer = optim.AdamW()
+    dalle = DALLE2(dataset)
     print('Begin training...')
     pass

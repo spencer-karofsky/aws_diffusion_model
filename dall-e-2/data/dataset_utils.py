@@ -109,33 +109,33 @@ class BaseDataset(ABC, Dataset):
 
 # Sub-classes of BaseDataset
 class MidjourneyDataset(BaseDataset):
-    def __init__(self, save_dir='../data/data_scripts/datasets/midjourney', transform=None):
+    def __init__(self, save_dir='../data/datasets/midjourney', transform=None):
         super().__init__()
         self.save_dir = os.path.abspath(save_dir)
         self.transform = transform
-        self.metadata_path = os.path.join(self.save_dir, "metadata.csv")
+        self.metadata_path = os.path.join(self.save_dir, 'metadata.csv')
 
         if os.path.isfile(self.metadata_path):
             # Load existing metadata with captions
             self.df = pd.read_csv(self.metadata_path)
 
             # Fix image paths to be absolute if they aren't already
-            self.df["image_path"] = self.df["image_path"].apply(
+            self.df['image_path'] = self.df['image_path'].apply(
                 lambda p: p if os.path.isabs(p) else os.path.join(self.save_dir, os.path.basename(p))
             )
         else:
             # Fallback: no metadata.csv, build from image files (blank captions)
-            print("metadata.csv not found — rebuilding metadata from image files...")
+            print('metadata.csv not found — rebuilding metadata from image files...')
             image_files = sorted([
                 f for f in os.listdir(self.save_dir)
                 if f.endswith(".jpg") and os.path.isfile(os.path.join(self.save_dir, f))
             ])
             if not image_files:
-                raise RuntimeError(f"No images found in {self.save_dir}")
+                raise RuntimeError(f'No images found in {self.save_dir}')
 
             self.df = pd.DataFrame({
-                "image_path": [os.path.join(self.save_dir, f) for f in image_files],
-                "caption": ["" for _ in image_files]
+                'image_path': [os.path.join(self.save_dir, f) for f in image_files],
+                'caption': ['' for _ in image_files]
             })
     
     def _split_into_quadrants(self, img: Image.Image) -> list:
@@ -150,24 +150,24 @@ class MidjourneyDataset(BaseDataset):
 
     def download(self, n_images: int = 1000) -> bool:
         try:
-            print("Loading metadata from Hugging Face...")
-            df = pd.read_parquet("hf://datasets/CortexLM/midjourney-v6/data/train-00000-of-00001.parquet")
-            df = df.dropna(subset=["image_url", "prompt"]).head(n_images).reset_index(drop=True)
+            print('Loading metadata from Hugging Face...')
+            df = pd.read_parquet('hf://datasets/CortexLM/midjourney-v6/data/train-00000-of-00001.parquet')
+            df = df.dropna(subset=['image_url', 'prompt']).head(n_images).reset_index(drop=True)
 
-            print("Starting parallel download...")
+            print('Starting parallel download...')
             saved = []
 
             def fetch_and_save(idx_row):
                 idx, row = idx_row
-                url, caption = row["image_url"], row["prompt"]
+                url, caption = row['image_url'], row['prompt']
                 try:
                     resp = requests.get(url, timeout=10)
                     resp.raise_for_status()
-                    image = Image.open(BytesIO(resp.content)).convert("RGB")
+                    image = Image.open(BytesIO(resp.content)).convert('RGB')
                     quadrants = self._split_into_quadrants(image)
                     results = []
                     for i, quad in enumerate(quadrants):
-                        fname = os.path.join(self.save_dir, f"{idx:06d}_{i}.jpg")
+                        fname = os.path.join(self.save_dir, f'{idx:06d}_{i}.jpg')
                         quad.save(fname)
                         results.append((fname, caption))
                     return results  # list of (fname, caption)
@@ -176,23 +176,23 @@ class MidjourneyDataset(BaseDataset):
 
             with ThreadPoolExecutor(max_workers=16) as executor:
                 futures = [executor.submit(fetch_and_save, item) for item in df.iterrows()]
-                for f in tqdm(as_completed(futures), total=len(futures), desc="Downloading"):
+                for f in tqdm(as_completed(futures), total=len(futures), desc='Downloading'):
                     result = f.result()
                     if result is not None:
                         saved.extend(result)  # add all four cropped images
 
             if saved:
-                df = pd.DataFrame(saved, columns=["image_path", "caption"])
+                df = pd.DataFrame(saved, columns=['image_path', 'caption'])
                 df.to_csv(self.metadata_path, index=False)
                 self.df = df
-                print(f"Downloaded and cropped {len(df)} image quadrants.")
+                print(f'Downloaded and cropped {len(df)} image quadrants.')
                 return True
             else:
-                print("No images downloaded.")
+                print('No images downloaded.')
                 return False
 
         except Exception as e:
-            print(f"Download failed: {e}")
+            print(f'Download failed: {e}')
             return False
 
 
@@ -203,12 +203,12 @@ class MidjourneyDataset(BaseDataset):
             self.df = pd.read_csv(self.metadata_path)
             return self.df
         else:
-            raise RuntimeError("Metadata not found. Please run `download()` first.")
+            raise RuntimeError('Metadata not found. Please run `download()` first.')
 
     def __getitem__(self, index: int) -> Tuple[List[torch.Tensor], str]:
         row = self.df.iloc[index]
-        image = Image.open(row["image_path"]).convert("RGB")
-        caption = row["caption"]
+        image = Image.open(row['image_path']).convert('RGB')
+        caption = row['caption']
 
         if self.transform:
             image = self.transform(image)
