@@ -94,8 +94,11 @@ class DALLETrainer:
                 total_steps += 1
                 pbar.set_postfix(loss=loss.item())
 
-            print(f"Epoch {epoch + 1} Loss: {epoch_loss / len(self.dataloader):.4f}")
-
+            print(f'Epoch {epoch + 1} Loss: {epoch_loss / len(self.dataloader):.4f}')
+            
+        save_path = 'dalle2_prior_final.pth'
+        torch.save(self.dalle.prior.state_dict(), save_path)
+        print(f'Saved trained prior to: {save_path}')
         return True
 
 if __name__ == "__main__":
