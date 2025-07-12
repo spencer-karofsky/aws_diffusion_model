@@ -33,10 +33,7 @@ Author:
     - Spencer Karofsky (https://github.com/spencer-karofsky)
 """
 import torch
-import torch.nn as nn
-#from dalle_core.unet.unet_decoder import UNetDenoiser
 from dalle_core.diffusion_models.noise_scheduler import NoiseScheduler
-import math
 
 class ForwardDiffuser:
     def __init__(
@@ -87,8 +84,12 @@ class ForwardDiffuser:
         # Sample random timesteps for each image in the batch
         ts = torch.randint(0, self.scheduler.T, (B,), device=device)
 
+        alpha_bars = self.scheduler.get_alpha_bar(ts)
+
         # Get alpha_bar_t for each sampled timestep
-        alpha_bars = self.scheduler.get_alpha_bar(ts).view(B, 1, 1, 1)
+        # Automatically match x_0's shape for broadcasting
+        while alpha_bars.ndim < x_0.ndim:
+            alpha_bars = alpha_bars.unsqueeze(-1)
 
         # Sample Gaussian noise
         eps = torch.randn_like(x_0)

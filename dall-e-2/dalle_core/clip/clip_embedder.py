@@ -26,6 +26,7 @@ import torch
 from PIL import Image
 from typing import List, Union
 import torch.nn as nn
+from torchvision.transforms.functional import to_pil_image
 
 class CLIPEmbedder(nn.Module):
     def __init__(
@@ -89,15 +90,18 @@ class CLIPEmbedder(nn.Module):
             text_features /= text_features.norm(dim=-1, keepdim=True)
         return text_features
 
-    def encode_image(self, images: List[Image.Image]) -> torch.Tensor:
+    def encode_image(self, images: Union[List[Image.Image], torch.Tensor]) -> torch.Tensor:
         """Converts images to CLIP image embeddings.
-        Args:
-            images: list of PIL images
-        Returns:
-            [B, D] tensor of image embeddings
+        Accepts either a list of PIL images or a batch tensor.
         """
+        if isinstance(images, torch.Tensor):
+            # Convert batched tensor [B, 3, H, W] into list of PIL Images
+            images = [to_pil_image(img) for img in images]
+
         batch = torch.stack([self.preprocess(img) for img in images]).to(self.device)
+
         with torch.no_grad():
             image_features = self.model.encode_image(batch)
             image_features /= image_features.norm(dim=-1, keepdim=True)
+
         return image_features

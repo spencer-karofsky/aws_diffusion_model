@@ -108,31 +108,27 @@ class Decoder(nn.Module):
         B = clip_image_embed.shape[0]
         device = clip_image_embed.device
 
-        # Sample pure noise images (64x64)
+        # Sample pure noise: [B, 3, 64, 64]
         x = torch.randn(B, 3, 64, 64, device=device)
 
-        # Use bilinear interpolation to upsample to 256x256
-        x = F.interpolate(
-            x,
-            size=(256, 256),
-            mode='bilinear',
-            align_corners=False
+        # Upsample to 256x256 just to match UNet input shape
+        x = F.interpolate(x, size=(256, 256), mode='bilinear', align_corners=False)
+
+        # Stage 1: 64 → 256
+        x = self.first_upsampler.sample(
+            x_T=x,
+            cond=clip_image_embed,
+            deterministic=deterministic
         )
 
-        for t in reversed(range(self.timesteps)):
-            t_tensor = torch.full((B,), t, dtype=torch.long, device=device)
-            x = self.first_upsampler(x, t_tensor, clip_image_embed, deterministic=deterministic)
+        # Upsample to 1024x1024 before second diffusion stage
+        x = F.interpolate(x, size=(1024, 1024), mode='bilinear', align_corners=False)
 
-        # Use bilinear interpolation to further upsample to 1024x1024
-        x = F.interpolate(
-            x,
-            size=(1024, 1024),
-            mode='bilinear',
-            align_corners=False
+        # Stage 2: 256 → 1024
+        x = self.second_upsampler.sample(
+            x_T=x,
+            cond=clip_image_embed,
+            deterministic=deterministic
         )
-
-        for t in reversed(range(self.timesteps)):
-            t_tensor = torch.full((B,), t, dtype=torch.long, device=device)
-            x = self.second_upsampler(x, t_tensor, clip_image_embed, deterministic=deterministic)
 
         return x

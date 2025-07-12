@@ -24,6 +24,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from dalle_core.dalle_model.dalle_2 import DALLE2
 from data.dataset_utils import MidjourneyDataset
+from dalle_core.diffusion_models.ddim_forward_diffusion import ForwardDiffuser
 
 class DALLETrainer:
     def __init__(
@@ -46,6 +47,7 @@ class DALLETrainer:
         self.optimizer = optimizer
         self.num_epochs = num_epochs
         self.device = device
+        self.forward_diffuser = ForwardDiffuser(noise_scheduler)
 
     def train(self, on_aws: bool = False) -> bool:
         if on_aws:
@@ -71,16 +73,14 @@ class DALLETrainer:
                     clean_img_embed = self.clip.encode_image(images).to(self.device)
 
                     # Sample time steps: [B]
-                    timesteps = torch.randint(0, self.scheduler.num_timesteps, (B,), device=self.device).long()
+                    timesteps = torch.randint(0, self.scheduler.T, (B,), device=self.device).long()
 
                     # Add noise to image embeddings → x_t, ε
-                    noised_embed, true_noise = self.scheduler.add_noise(clean_img_embed, timesteps)
+                    noised_embed, timesteps, true_noise = self.forward_diffuser.forward_process(clean_img_embed)
 
-                    # Get timestep embedding: [B, 512]
-                    timestep_embed = self.scheduler.get_timestep_embedding(timesteps).to(self.device)
 
                 # Predict noise using prior
-                predicted_noise = self.dalle.prior(text_embed, timestep_embed, noised_embed)
+                predicted_noise = self.dalle.prior(text_embed, timesteps, noised_embed)
 
                 # Compute loss
                 loss = F.mse_loss(predicted_noise, true_noise)
