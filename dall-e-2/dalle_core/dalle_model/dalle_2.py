@@ -44,8 +44,8 @@ from torch.utils.data import DataLoader
 from typing import List
 
 from dalle_core.prior.dalle_2_prior import DiffusionPrior
-from dalle_core.decoder.dalle_2_decoder import Decoder
-from dalle_core.clip.clip_embedder import CLIPEmbedder
+from ..decoder.dalle_2_decoder import Decoder
+from ..clip.clip_embedder import CLIPEmbedder
 
 from data.dataset_utils import BaseDataset
 
@@ -73,12 +73,9 @@ class DALLE2(nn.Module):
         self.decoder = Decoder()
         
         self.dataset = dataset
-        self.optimizer = optimizer
-        self.batch_size = batch_size
-        self.num_epochs = num_epochs
         self.device = device
 
-        self.dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=4)
+        self.dataloader = DataLoader(dataset, shuffle=True, num_workers=4)
 
         self.clip_embedder = CLIPEmbedder()
     

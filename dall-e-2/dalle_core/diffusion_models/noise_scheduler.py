@@ -61,11 +61,12 @@ Author:
     - Spencer Karofsky (https://github.com/spencer-karofsky)
 """
 import torch
+from typing import Union
 
 class NoiseScheduler:
     def __init__(
             self,
-            T: int = 1000,
+            T: int,
             beta_low: float = 1e-4,
             beta_high: float = .02
         ):
@@ -86,29 +87,18 @@ class NoiseScheduler:
         # Define all alpha_bars, using vectorized approach for speed
         self.alpha_bars = torch.cumprod(self.alphas, dim=0)
     
-    def get_beta(self, t: torch.Tensor) -> torch.Tensor:
-        """Looks-up beta value at timestep t
-        Args:
-            t: the timesteps
-        Returns:
-            beta_ts
-        """
-        return self.betas[t]
-    
-    def get_alpha(self, t: torch.Tensor) -> torch.Tensor:
-        """Looks-up alpha value at timestep t
-        Args:
-            t: the timesteps
-        Returns:
-            alpha_ts
-        """
-        return self.alphas[t]
-    
-    def get_alpha_bar(self, t: torch.Tensor) -> torch.Tensor:
-        """Looks-up alpha_bar value at timestep t
-        Args:
-            t: the timesteps
-        Returns:
-            alpha_bar_ts
-        """
-        return self.alpha_bars[t]
+    def _to_tensor_index(self, t: Union[int, torch.Tensor]) -> torch.Tensor:
+        """Ensures t is a tensor on the same device as the schedule tensors."""
+        if isinstance(t, torch.Tensor):
+            return t
+        else:
+            return torch.tensor([t], dtype=torch.long, device=self.betas.device)
+
+    def get_beta(self, t: Union[int, torch.Tensor]) -> torch.Tensor:
+        return self.betas[self._to_tensor_index(t)]
+
+    def get_alpha(self, t: Union[int, torch.Tensor]) -> torch.Tensor:
+        return self.alphas[self._to_tensor_index(t)]
+
+    def get_alpha_bar(self, t: Union[int, torch.Tensor]) -> torch.Tensor:
+        return self.alpha_bars[self._to_tensor_index(t)]

@@ -3,8 +3,9 @@ dalle_trainer: trains DALL·E 2
 
 Usage:
     From the CLI, run:
-        $ cd aws_diffusion_model  # Root project directory
+        $ cd ../aws_diffusion_model/dall-e-2
         $ python -m dalle_core.dalle_model.dalle_trainer
+
 
 Classes:
     - DALLETrainer: trains and runs inference on the DALL·E 2 architecture
@@ -36,7 +37,7 @@ class DALLETrainer:
         device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
     ):
         """Initializes the DALL·E 2 trainer
-        
+
         """
         self.dalle = dalle_model
         self.clip = clip_embedder
@@ -98,8 +99,38 @@ class DALLETrainer:
         return True
 
 if __name__ == "__main__":
+    from dalle_core.clip.clip_embedder import CLIPEmbedder
+    from dalle_core.diffusion_models.noise_scheduler import NoiseScheduler
+
+    # Load dataset
     dataset = MidjourneyDataset()
-    optimizer = optim.AdamW()
-    dalle = DALLE2(dataset)
+    dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
+
+    # Create CLIP embedder (frozen)
+    clip_embedder = CLIPEmbedder()
+
+    # Create noise scheduler
+    scheduler = NoiseScheduler(T=1000)
+
+    # Create DALL·E 2 model
+    dalle = DALLE2(
+        dataset=dataset,
+        device='cuda' if torch.cuda.is_available() else 'cpu'
+    )
+
+    # Create optimizer (for the prior only)
+    optimizer = optim.AdamW(dalle.prior.parameters(), lr=1e-4)
+
+    # Create trainer
+    trainer = DALLETrainer(
+        dalle_model=dalle,
+        clip_embedder=clip_embedder,
+        noise_scheduler=scheduler,
+        dataloader=dataloader,
+        optimizer=optimizer,
+        num_epochs=10
+    )
+
+    # Train
     print('Begin training...')
-    pass
+    trainer.train()

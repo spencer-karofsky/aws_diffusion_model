@@ -25,8 +25,9 @@ import open_clip
 import torch
 from PIL import Image
 from typing import List, Union
+import torch.nn as nn
 
-class CLIPEmbedder:
+class CLIPEmbedder(nn.Module):
     def __init__(
             self,
             model_name: str = "ViT-B-32",
@@ -41,6 +42,7 @@ class CLIPEmbedder:
             pretrained: which pretrained weights (e.g. "laion2b_s34b_b79k")
             device: computation device (defaults to GPU if available)
         """
+        super().__init__()
         if not device:
             if torch.cuda.is_available():
                 self.device = 'cuda'

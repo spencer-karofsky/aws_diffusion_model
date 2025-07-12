@@ -62,7 +62,7 @@ class Decoder(nn.Module):
         super().__init__()
 
         # Initialize diffusion utilities
-        self.scheduler = NoiseScheduler(timesteps=timesteps)
+        self.scheduler = NoiseScheduler(T=timesteps)
         self.diffuser = ForwardDiffuser(self.scheduler)
         self.timesteps = timesteps
 

@@ -130,14 +130,14 @@ class ResBlock(nn.Module):
         self.in_channels = in_channels
         self.out_channels = out_channels
 
-        self.norm1 = nn.GroupNorm(32, in_channels)
+        self.norm1 = self._get_valid_groupnorm(in_channels)
         self.activation = nn.SiLU()
         self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
 
         # Projects time embedding to channel dim
         self.time_proj = nn.Linear(time_emb_dim, out_channels)
 
-        self.norm2 = nn.GroupNorm(32, out_channels)
+        self.norm2 = self._get_valid_groupnorm(out_channels)
         self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1)
 
         # 1×1 conv to match channels if needed
@@ -145,6 +145,14 @@ class ResBlock(nn.Module):
             nn.Conv2d(in_channels, out_channels, kernel_size=1)
             if in_channels != out_channels else nn.Identity()
         )
+    
+    def _get_valid_groupnorm(self, num_channels: int, max_groups: int = 32) -> nn.GroupNorm:
+        """Returns a GroupNorm layer with the largest valid number of groups ≤ max_groups.
+        """
+        for g in reversed(range(1, max_groups + 1)):
+            if num_channels % g == 0:
+                return nn.GroupNorm(g, num_channels)
+        raise ValueError(f"No valid GroupNorm group count found for {num_channels} channels")
 
     def forward(self, x: torch.Tensor, t_emb: torch.Tensor) -> torch.Tensor:
         """

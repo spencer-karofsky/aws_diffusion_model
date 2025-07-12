@@ -35,7 +35,7 @@ Author:
 import torch
 import torch.nn as nn
 #from dalle_core.unet.unet_decoder import UNetDenoiser
-from dalle_core.diffusion.noise_scheduler import NoiseScheduler
+from dalle_core.diffusion_models.noise_scheduler import NoiseScheduler
 import math
 
 class ForwardDiffuser:

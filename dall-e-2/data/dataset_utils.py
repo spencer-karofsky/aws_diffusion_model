@@ -61,6 +61,7 @@ import requests
 from io import BytesIO
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from torchvision import transforms
 
 # Parent (abstract) class that also inherits from torch's Dataset class
 class BaseDataset(ABC, Dataset):
@@ -109,22 +110,26 @@ class BaseDataset(ABC, Dataset):
 
 # Sub-classes of BaseDataset
 class MidjourneyDataset(BaseDataset):
-    def __init__(self, save_dir='../data/datasets/midjourney', transform=None):
+    def __init__(self, save_dir=None, transform=None):
         super().__init__()
-        self.save_dir = os.path.abspath(save_dir)
+
+        # Automatically compute absolute path relative to this script
+        if save_dir is None:
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            save_dir = os.path.abspath(os.path.join(current_dir, '..', 'data', 'datasets', 'midjourney'))
+
+        self.save_dir = save_dir
+        os.makedirs(self.save_dir, exist_ok=True)
+
         self.transform = transform
         self.metadata_path = os.path.join(self.save_dir, 'metadata.csv')
 
         if os.path.isfile(self.metadata_path):
-            # Load existing metadata with captions
             self.df = pd.read_csv(self.metadata_path)
-
-            # Fix image paths to be absolute if they aren't already
             self.df['image_path'] = self.df['image_path'].apply(
                 lambda p: p if os.path.isabs(p) else os.path.join(self.save_dir, os.path.basename(p))
             )
         else:
-            # Fallback: no metadata.csv, build from image files (blank captions)
             print('metadata.csv not found — rebuilding metadata from image files...')
             image_files = sorted([
                 f for f in os.listdir(self.save_dir)
@@ -132,7 +137,6 @@ class MidjourneyDataset(BaseDataset):
             ])
             if not image_files:
                 raise RuntimeError(f'No images found in {self.save_dir}')
-
             self.df = pd.DataFrame({
                 'image_path': [os.path.join(self.save_dir, f) for f in image_files],
                 'caption': ['' for _ in image_files]
@@ -205,14 +209,18 @@ class MidjourneyDataset(BaseDataset):
         else:
             raise RuntimeError('Metadata not found. Please run `download()` first.')
 
-    def __getitem__(self, index: int) -> Tuple[List[torch.Tensor], str]:
-        row = self.df.iloc[index]
+    def __getitem__(self, idx):
+        row = self.df.iloc[idx]
         image = Image.open(row['image_path']).convert('RGB')
-        caption = row['caption']
 
+        # If you provided a transform, use it
         if self.transform:
             image = self.transform(image)
+        else:
+            # Otherwise convert to tensor
+            image = transforms.ToTensor()(image)
 
+        caption = row['caption']
         return image, caption
 
 
