@@ -50,7 +50,7 @@ from dalle_core.decoder.dalle_2_decoder import Decoder
 from dalle_core.clip.clip_embedder import CLIPEmbedder
 
 
-from data.data_scripts.dataset_utils import BaseDataset
+from data.dataset_utils import BaseDataset
 
 
 class DALLE2(nn.Module):
