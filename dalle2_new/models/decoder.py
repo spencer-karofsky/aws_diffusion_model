@@ -42,8 +42,6 @@ from timestep_embedding import TimestepEmbedder
 from sampling.noise_scheduler import NoiseScheduler
 from sampling.ddim_sampling import DDIMSampler
 
-# Other imports
-
 class Decoder(nn.Module):
     def __init__(
             self,
