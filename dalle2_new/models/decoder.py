@@ -127,7 +127,7 @@ class Decoder(nn.Module):
             t_emb: the projected timesteps, of shape (B, 512)
 
         Returns:
-            Predicted noise in pixel space, eps_theta, of shape (B, 3, H, W)
+            Predicted noise (epsilon), eps_theta, of shape (B, 3, H, W)
         """
         return self.decoder_unet.forward(
             x_t=x_t,
@@ -151,7 +151,7 @@ class Decoder(nn.Module):
             steps: number of timesteps to use in the reverse diffusion loop
         
         Returns:
-            z_hat_img: the predicted CLIP image embeddings, of shape (B, 512)
+            z_hat_img: the predicted CLIP image embeddings, of shape (B, 3, H, W)
         """
         # Get the batch size, B
         B = z_img.size(0) # Gets the first dimension
@@ -160,7 +160,7 @@ class Decoder(nn.Module):
         return sampler.sample(
             model=self,
             z_cond=z_img,
-            shape=(B, 512),
+            shape=(B, 3, self.IMG_SIZE, self.IMG_SIZE),
             steps=steps,
             T=self.T
         )
