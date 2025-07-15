@@ -29,8 +29,8 @@ Classes:
 References:
     * DALL·E 2 Paper: https://cdn.openai.com/papers/dall-e-2.pdf
     * DDPM Paper: https://arxiv.org/pdf/2006.11239
-    * My DALL·E 2 Notes: https://github.com/spencer-karofsky/aws_diffusion_model/blob/main/dall-e-2/research_notes/DALL-E-2%202022.pdf or /dall-e-2/research_notes/DALL-E-2 2022.pdf
-    * My DDPM Notes: https://github.com/spencer-karofsky/aws_diffusion_model/blob/main/dall-e-2/research_notes/DDPM%202020.pdf or /dall-e-2/research_notes/DDPM 2020.pdf
+    * My DALL·E 2 Notes: https://github.com/spencer-karofsky/aws_diffusion_model/blob/main/dalle2_new/research_notes/DALL-E-2%202022.pdf or /dalle2_new/research_notes/DALL-E-2 2022.pdf
+    * My DDPM Notes: https://github.com/spencer-karofsky/aws_diffusion_model/blob/main/dalle2_new/research_notes/DDPM%202020.pdf or /dalle2_new/research_notes/DDPM 2020.pdf
     
 Author:
     * Spencer Karofsky (https://github.com/spencer-karofsky)
@@ -63,7 +63,10 @@ class Prior(nn.Module):
             # Instantiate prior model architecture
             prior_model = Prior(...)
             
-            # Training: perform full denoising process during
+            # Training: compute one forward pass and predict the noise
+            eps_theta = prior_model.forward(...) # Use predicted noise to compute loss
+
+            # Inference: sample the prior
             img_emb_pred = prior_model.sample(...)
 
         Args:
@@ -124,13 +127,19 @@ class Prior(nn.Module):
             device=self.device
         )
 
-    def sample(self, z_txt: torch.Tensor, sampler: DDIMSampler, steps: int = 25):
+    def sample(
+            self,
+            z_txt: torch.Tensor,
+            sampler: DDIMSampler,
+            steps: int = 25
+    ) -> torch.Tensor:
         """
         Defines the full forward pass of the prior (used during inference only)
 
         Args:
             z_txt: the CLIP text embeddings, of shape (B, 512) (B=batch size)
-            t_emb: the projected timesteps, of shape (B, 512)
+            sampler: the DDIM sampler, which runs the reverse diffusion process to generate a clean sample from noise. 
+            steps: number of timesteps to use in the reverse diffusion loop
         
         Returns:
             z_hat_img: the predicted CLIP image embeddings, of shape (B, 512)
