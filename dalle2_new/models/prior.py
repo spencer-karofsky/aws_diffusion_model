@@ -59,14 +59,9 @@ class Prior(nn.Module):
 
         Example Usage:
             from prior import Prior
-
-            # Instantiate prior model architecture
-            prior_model = Prior(...)
             
-            # Training: compute one forward pass and predict the noise
+            prior_model = Prior(...)
             eps_theta = prior_model.forward(...) # Use predicted noise to compute loss
-
-            # Inference: sample the prior
             img_emb_pred = prior_model.sample(...)
 
         Args:

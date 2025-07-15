@@ -58,13 +58,8 @@ class Decoder(nn.Module):
         Example Usage:
             from decoder import Decoder
 
-            # Instantiate decoder architecture
             decoder_model = Decoder(...)
-
-            # Training: compute one forward pass and predict batch of clean images
             img_pred = decoder_model.forward(...) # Feed img_pred into loss computation
-
-            # Inference: sample the decoder
             img_pred = decoder_model.sample(...)
         
         Args:
