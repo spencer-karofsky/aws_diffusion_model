@@ -23,10 +23,12 @@ Classes:
 References:
     * DALL·E 2 Paper: https://cdn.openai.com/papers/dall-e-2.pdf
     * DDPM Paper: https://arxiv.org/pdf/2006.11239
+    * DDIM Paper: https://arxiv.org/pdf/2006.11239
     * U-Net Paper: https://arxiv.org/pdf/1505.04597
     * My DALL·E 2 Notes: https://github.com/spencer-karofsky/aws_diffusion_model/blob/main/dalle2_new/research_notes/DALL-E-2%202022.pdf or /dalle2_new/research_notes/DALL-E-2 2022.pdf
     * My DDPM Notes: https://github.com/spencer-karofsky/aws_diffusion_model/blob/main/dalle2_new/research_notes/DDPM%202020.pdf or /dalle2_new/research_notes/DDPM 2020.pdf
     * My U-Net Notes: https://github.com/spencer-karofsky/aws_diffusion_model/blob/main/dalle2_new/research_notes/U-net%202015.pdf or /dalle2_new/research_notes/U-net 2015.pdf
+    * My DDIM Notes: https://github.com/spencer-karofsky/aws_diffusion_model/blob/main/dalle2_new/research_notes/DDIM%202021.pdf or /dalle2_new/research_notes/DDIM 2021.pdf
 
 Author:
     * Spencer Karofsky (https://github.com/spencer-karofsky)
@@ -64,7 +66,7 @@ class Decoder(nn.Module):
             device: the PyTorch device (CUDA, Metal (MPS), or CPU)
             T: the total number of noising/denoising timesteps (total for each individually, not total of both combined)
             on_aws: configures for AWS (TODO Configure script for AWS)
-            debug: debug: outputs relevant information (useful for debugging)        
+            debug: debug: outputs relevant information (useful for debugging)
         """
         super().__init__()
 
@@ -82,18 +84,19 @@ class Decoder(nn.Module):
         self.IN_CHANNELS = 3 # 3 color channels (RGB)
         self.COND_EMB_DIM = 512 # embedding dimensionality of the conditioning vector you inject into the U-Net
         self.BASE_CHANNELS = 64 # base channels in the first convolution layer
-        self.CHANNEL_MULTS = (1, 2, 4, 8) # base channel multiplier at each level
+        self.CHANNEL_MULTS = (1, 2, 4, 8,) # base channel multiplier at each level
         self.RESIDUAL_BLOCKS = 2 # number of residual blocks at each level (use 2 for now)
         self.ATTENTION_RESOLUTIONS = (16,) # Resolutions at which we apply attention (e.g., (16,) means we apply attention when the image size is 16x16)
 
         self.decoder_unet = DecoderUNet(
+            channel_multipliers=self.CHANNEL_MULTS,
+            attention_resolutions=self.ATTENTION_RESOLUTIONS,
             image_size=self.IMG_SIZE,
             in_channels=self.IN_CHANNELS,
             conditional_embedding_dim=self.COND_EMB_DIM,
             base_channels=self.BASE_CHANNELS,
-            channel_multipliers=self.CHANNEL_MULTS,
             residual_blocks=self.RESIDUAL_BLOCKS,
-            attention_resolutions=self.ATTENTION_RESOLUTIONS
+            device=self.device
         )
 
         # Initialize DDIM Sampler (DDIMSampler.sample is a fully-deterministic process)
@@ -126,7 +129,6 @@ class Decoder(nn.Module):
             x_t=x_t,
             z_img=z_img,
             t_emb=t_emb,
-            device=self.device
         )
     
     def sample(
