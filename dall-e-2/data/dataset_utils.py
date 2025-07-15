@@ -62,6 +62,9 @@ from io import BytesIO
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from torchvision import transforms
+from pycocotools.coco import COCO
+import zipfile
+from urllib.request import urlretrieve
 
 # Parent (abstract) class that also inherits from torch's Dataset class
 class BaseDataset(ABC, Dataset):
@@ -223,8 +226,143 @@ class MidjourneyDataset(BaseDataset):
         caption = row['caption']
         return image, caption
 
-
     def __len__(self) -> int:
         if self.df is None:
             self.load_metadata()
+        return len(self.df)
+
+class COCODataset(Dataset):
+    # Use only for implementation
+    def __init__(self, save_dir=None, transform=None, categories=None, max_images=1000):
+        super().__init__()
+
+        # Default directory
+        if save_dir is None:
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            save_dir = os.path.abspath(os.path.join(current_dir, '..', 'data', 'local_datasets', 'coco'))
+
+        self.save_dir = save_dir
+        os.makedirs(self.save_dir, exist_ok=True)
+
+        self.images_dir = os.path.join(self.save_dir, 'val2017')
+        self.annotations_dir = os.path.join(self.save_dir, 'annotations')
+        self.metadata_path = os.path.join(self.save_dir, 'metadata.csv')
+        self.transform = transform
+
+        if isinstance(categories, str):
+            categories = [categories]
+        self.categories = categories
+        self.max_images = max_images
+
+        self.df = None
+        self.coco = None
+        self.instances = None
+
+        # Load existing metadata if available
+        if os.path.exists(self.metadata_path):
+            self.df = pd.read_csv(self.metadata_path)
+
+    def download(self):
+        # Check if already downloaded
+        if os.path.exists(self.metadata_path) and os.path.exists(self.images_dir) and os.path.exists(self.annotations_dir):
+            print("COCO dataset already downloaded and processed. Skipping.")
+            return
+
+        # Download val2017 images
+        if not os.path.exists(self.images_dir):
+            print("Downloading COCO val2017 images...")
+            urlretrieve("http://images.cocodataset.org/zips/val2017.zip", os.path.join(self.save_dir, 'val2017.zip'))
+            with zipfile.ZipFile(os.path.join(self.save_dir, 'val2017.zip'), 'r') as zip_ref:
+                zip_ref.extractall(self.save_dir)
+            os.remove(os.path.join(self.save_dir, 'val2017.zip'))
+
+        # Download annotations
+        if not os.path.exists(self.annotations_dir):
+            print("Downloading COCO annotations...")
+            urlretrieve("http://images.cocodataset.org/annotations/annotations_trainval2017.zip", os.path.join(self.save_dir, 'annotations.zip'))
+            with zipfile.ZipFile(os.path.join(self.save_dir, 'annotations.zip'), 'r') as zip_ref:
+                zip_ref.extractall(self.save_dir)
+            os.remove(os.path.join(self.save_dir, 'annotations.zip'))
+
+        # Load COCO jsons
+        self.instances = COCO(os.path.join(self.annotations_dir, 'instances_val2017.json'))
+        self.coco = COCO(os.path.join(self.annotations_dir, 'captions_val2017.json'))
+
+        # Build metadata if needed
+        print("Building metadata...")
+        self.df = self._build_metadata(self.categories, self.max_images)
+
+    def _build_metadata(self, keywords=None, max_images=1000):
+        assert self.coco is not None, "Must load captions COCO first."
+
+        img_ids = self.coco.getImgIds()
+        print(f"Total captioned images in COCO: {len(img_ids)}")
+
+        if keywords:
+            keywords = [k.lower() for k in keywords]
+        else:
+            keywords = []
+
+        records = []
+        for img_id in tqdm(img_ids, desc="Filtering captions by keyword"):
+            img_info = self.coco.loadImgs(img_id)[0]
+
+            ann_ids = self.coco.getAnnIds(imgIds=img_id)
+            anns = self.coco.loadAnns(ann_ids)
+
+            for ann in anns:
+                caption = ann.get('caption', '').strip().lower()
+                if not caption:
+                    continue
+
+                if any(keyword in caption for keyword in keywords):
+                    image_path = os.path.join(self.images_dir, img_info['file_name'])
+                    records.append({'image_path': image_path, 'caption': caption})
+                    break  # only need one match per image
+
+            if len(records) >= max_images:
+                break
+
+        print(f"Found {len(records)} images with captions matching keywords.")
+        df = pd.DataFrame(records)
+        df.to_csv(self.metadata_path, index=False)
+        return df
+
+    # def __getitem__(self, idx):
+    #     if self.df is None:
+    #         raise RuntimeError("Dataset not loaded. Please run `download()` first.")
+    #     row = self.df.iloc[idx]
+    #     image = Image.open(row['image_path']).convert('RGB')
+
+    #     img_path = self.df.iloc[0]['image_path']
+    #     caption = self.df.iloc[0]['caption']
+    #     return 
+
+    #     if self.transform:
+    #         image = self.transform(image)
+    #     else:
+    #         image = transforms.ToTensor()(image)
+
+    #     return image, row['caption']
+    def __getitem__(self, idx):
+        if self.df is None:
+            raise RuntimeError("Dataset not loaded. Please run `download()` first.")
+
+        # Always fetch the first sample (overfitting)
+        row = self.df.iloc[0]
+        image = Image.open(row['image_path']).convert('RGB')
+        caption = row['caption']
+
+        if self.transform:
+            image = self.transform(image)
+        else:
+            image = transforms.ToTensor()(image)
+
+        return image, caption
+
+
+    def __len__(self):
+        return 64
+        if self.df is None:
+            raise RuntimeError("Dataset not loaded. Please run `download()` first.")
         return len(self.df)

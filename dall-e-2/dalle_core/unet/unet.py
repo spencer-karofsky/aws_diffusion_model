@@ -411,23 +411,34 @@ class UNetUpsamplingBlock(nn.Module):
             num_res_blocks: number of ResBlocks per resolution level. Default is 2
         """
         super().__init__()
-
         self.blocks = nn.ModuleList()
         self.resolutions = []
 
         curr_res = image_size // (2 ** (len(channel_multipliers) - 1))
+
+        # Precompute skip channel sizes from encoder path
+        skip_channels = [
+            base_channels * mult
+            for mult in channel_multipliers
+            for _ in range(num_res_blocks)
+        ][::-1]  # reversed for popping
+
         in_ch = base_channels * channel_multipliers[-1]
 
         for i, mult in reversed(list(enumerate(channel_multipliers))):
             out_ch = base_channels * mult
-            for _ in range(num_res_blocks + 1):  # +1 for skip connection concat
-                self.blocks.append(ResBlock(in_ch, out_ch, time_emb_dim))
+
+            for j in range(num_res_blocks):
+                skip_ch = skip_channels.pop()
+
+                # concat(x, skip): in_ch + skip_ch
+                resblock_in = in_ch + skip_ch
+                self.blocks.append(ResBlock(resblock_in, out_ch, time_emb_dim))
                 in_ch = out_ch
 
                 if curr_res in attention_resolutions:
                     self.blocks.append(AttentionBlock(out_ch))
 
-            # Only add Upsample if not final level
             if i != 0:
                 self.blocks.append(Upsample(out_ch))
                 curr_res *= 2
@@ -455,6 +466,8 @@ class UNetUpsamplingBlock(nn.Module):
         for block in self.blocks:
             if isinstance(block, ResBlock):
                 skip = skips.pop()
+                if x.shape[-2:] != skip.shape[-2:]:
+                    x = F.interpolate(x, size=skip.shape[-2:], mode="nearest")
                 x = torch.cat([x, skip], dim=1)
                 x = block(x, t_emb)
             elif isinstance(block, AttentionBlock):
@@ -465,15 +478,16 @@ class UNetUpsamplingBlock(nn.Module):
         return x
 
 # ----------------------------------------
-# Main U-Net Denoiser
+# Main U-Net Denoisers
 # ----------------------------------------
+
 class UNetDenoiser(nn.Module):
     def __init__(
         self,
         in_channels: int = 3,
         out_channels: int = 3,
         base_channels: int = 128,
-        channel_multipliers: List[int] = [1, 2, 4, 8],
+        channel_multipliers: List[int] = [1, 2, 4],
         time_emb_dim: int = 512,
         attention_resolutions: List[int] = [16],
         image_size: int = 128,
@@ -492,6 +506,7 @@ class UNetDenoiser(nn.Module):
             num_res_blocks: Number of residual blocks per resolution level
         """
         super().__init__()
+        print("🚨 U-Net weights reinitialized!")
 
         self.time_embedding = TimeEmbedding(time_emb_dim)
 
@@ -531,7 +546,8 @@ class UNetDenoiser(nn.Module):
             self,
             x: torch.Tensor,
             t: torch.Tensor,
-            text_embed: torch.Tensor
+            text_embed: torch.Tensor,
+            target_shape: tuple = None
         ) -> torch.Tensor:
         """
         Args:
@@ -552,5 +568,8 @@ class UNetDenoiser(nn.Module):
         x = self.final_norm(x)
         x = self.final_act(x)
         x = self.final_conv(x)
+
+        if target_shape is not None and x.shape[-2:] != target_shape:
+            x = F.interpolate(x, size=target_shape, mode='bilinear')
 
         return x

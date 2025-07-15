@@ -1,3 +1,7 @@
 *.pyc
 *.jpg
+*.csv
+*.json
+*.zip
+*.png
 __pycache__/
