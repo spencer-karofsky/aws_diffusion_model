@@ -20,7 +20,7 @@ Classes:
 
 References:
     * DALL·E 2 Paper: https://cdn.openai.com/papers/dall-e-2.pdf
-    * My DALL·E 2 Notes: https://github.com/spencer-karofsky/aws_diffusion_model/blob/main/dall-e-2/research_notes/DALL-E-2%202022.pdf or /dall-e-2/research_notes/DALL-E-2 2022.pdf
+    * My DALL·E 2 Notes: https://github.com/spencer-karofsky/aws_diffusion_model/blob/main/dalle2/research_notes/DALL-E-2%202022.pdf or /dalle2/research_notes/DALL-E-2 2022.pdf
 
 Author:
     * Spencer Karofsky (https://github.com/spencer-karofsky)

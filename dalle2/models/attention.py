@@ -10,7 +10,7 @@ Classes:
 
 References:
     * Transformer Paper: https://arxiv.org/pdf/1706.03762
-    * My Transformer Notes: https://github.com/spencer-karofsky/aws_diffusion_model/blob/main/dalle2_new/research_notes/Attention%20is%20All%20You%20Need.pdf or /dalle2_new/research_notes/Attention is All You Need.pdf
+    * My Transformer Notes: https://github.com/spencer-karofsky/aws_diffusion_model/blob/main/dalle2/research_notes/Attention%20is%20All%20You%20Need.pdf or /dalle2/research_notes/Attention is All You Need.pdf
 
 Author:
     * Spencer Karofsky (https://github.com/spencer-karofsky)

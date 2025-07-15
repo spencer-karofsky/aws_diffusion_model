@@ -25,10 +25,10 @@ References:
     * DDPM Paper: https://arxiv.org/pdf/2006.11239
     * DDIM Paper: https://arxiv.org/pdf/2006.11239
     * U-Net Paper: https://arxiv.org/pdf/1505.04597
-    * My DALL·E 2 Notes: https://github.com/spencer-karofsky/aws_diffusion_model/blob/main/dalle2_new/research_notes/DALL-E-2%202022.pdf or /dalle2_new/research_notes/DALL-E-2 2022.pdf
-    * My DDPM Notes: https://github.com/spencer-karofsky/aws_diffusion_model/blob/main/dalle2_new/research_notes/DDPM%202020.pdf or /dalle2_new/research_notes/DDPM 2020.pdf
-    * My U-Net Notes: https://github.com/spencer-karofsky/aws_diffusion_model/blob/main/dalle2_new/research_notes/U-net%202015.pdf or /dalle2_new/research_notes/U-net 2015.pdf
-    * My DDIM Notes: https://github.com/spencer-karofsky/aws_diffusion_model/blob/main/dalle2_new/research_notes/DDIM%202021.pdf or /dalle2_new/research_notes/DDIM 2021.pdf
+    * My DALL·E 2 Notes: https://github.com/spencer-karofsky/aws_diffusion_model/blob/main/dalle2/research_notes/DALL-E-2%202022.pdf or /dalle2/research_notes/DALL-E-2 2022.pdf
+    * My DDPM Notes: https://github.com/spencer-karofsky/aws_diffusion_model/blob/main/dalle2/research_notes/DDPM%202020.pdf or /dalle2/research_notes/DDPM 2020.pdf
+    * My U-Net Notes: https://github.com/spencer-karofsky/aws_diffusion_model/blob/main/dalle2/research_notes/U-net%202015.pdf or /dalle2/research_notes/U-net 2015.pdf
+    * My DDIM Notes: https://github.com/spencer-karofsky/aws_diffusion_model/blob/main/dalle2/research_notes/DDIM%202021.pdf or /dalle2/research_notes/DDIM 2021.pdf
 
 Author:
     * Spencer Karofsky (https://github.com/spencer-karofsky)
