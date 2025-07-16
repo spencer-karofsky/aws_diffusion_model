@@ -1,9 +1,6 @@
 """
 shared_modules.py: Contains low-level modules used by the U-Net and Transformer. 
 
-Description:
-    * TODO
-
 Classes:
     * ResidualBlock(nn.Module): Core U-Net block that enables gradient flow via skip connections.
     * DownsampleBlock(nn.Module): Reduces spatial resolution of feature maps.
@@ -26,12 +23,6 @@ Author:
 # PyTorch imports
 import torch
 import torch.nn as nn
-
-# Module imports
-
-
-# Other imports
-
 
 class ConditioningProjector(nn.Module):
     def __init__(
@@ -60,7 +51,13 @@ class ConditioningProjector(nn.Module):
             hidden_dim: output dimensionality of the projector
         """
         super().__init__()
-        pass
+
+        # Initialize Sequential neural network
+        self.projection_mlp = nn.Sequential(
+            nn.Linear(input_dim * 2, hidden_dim),
+            nn.SiLU(),
+            nn.Linear(hidden_dim, hidden_dim)
+        )
 
     def forward(
             self,
@@ -78,7 +75,9 @@ class ConditioningProjector(nn.Module):
         Returns:
             a fused conditioning vector of shape (B, cond_dim), where cond_dim is the projection output dimensionality.
         """
-        pass
+        # Concat t_emb and z_img, resulting in shape (B, 2D)
+        x = torch.cat([t_emb, z_img], dim=-1)
+        return self.projection_mlp(x)
 
 class ResidualBlock(nn.Module):
     def __init__(
@@ -110,7 +109,21 @@ class ResidualBlock(nn.Module):
             cond_dim: the dimensionality of the conditioning vector
         """
         super().__init__()
-        pass
+        
+        self.norm1 = nn.GroupNorm(8, in_channels)
+        self.act1 = nn.SiLU()
+        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
+
+        self.norm2 = nn.GroupNorm(8, out_channels)
+        self.act2 = nn.SiLU()
+        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1)
+
+        self.cond_proj = nn.Linear(cond_dim, out_channels)
+
+        self.skip = (
+            nn.Conv2d(in_channels, out_channels, kernel_size=1)
+            if in_channels != out_channels else nn.Identity()
+        )
 
     def forward(
             self,
@@ -131,7 +144,21 @@ class ResidualBlock(nn.Module):
         Returns:
             the output feature map, of shape (B, out_channels, H, W)
         """
-        pass
+        residual = self.skip(x)
+
+        x = self.norm1(x)
+        x = self.act1(x)
+        x = self.conv1(x)
+
+        # Inject conditioning (broadcasted)
+        cond = self.cond_proj(cond_emb).unsqueeze(-1).unsqueeze(-1) # (B, out_channels, 1, 1)
+        x = x + cond
+
+        x = self.norm2(x)
+        x = self.act2(x)
+        x = self.conv2(x)
+
+        return x + residual
 
 class DownsampleBlock(nn.Module):
     def __init__(
@@ -159,7 +186,14 @@ class DownsampleBlock(nn.Module):
             out_channels: the number of output channels
         """
         super().__init__()
-        pass
+        
+        self.downsample = nn.Conv2d(
+            in_channels,
+            out_channels,
+            kernel_size=4,
+            stride=2,
+            padding=1
+        )
 
     def forward(
             self,
@@ -176,7 +210,7 @@ class DownsampleBlock(nn.Module):
         Returns:
             the downsampled feature map of shape (B, out_channels, H/2, W/2)
         """
-        pass
+        return self.downsample(x)
 
 
 class UpsampleBlock(nn.Module):
@@ -208,7 +242,10 @@ class UpsampleBlock(nn.Module):
             method: Upsampling method; options include 'nearest' (followed by Conv) or 'transpose' (ConvTranspose2d).
         """
         super().__init__()
-        pass
+        self.upsample = nn.Sequential(
+            nn.Upsample(scale_factor=2, mode='nearest'),
+            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
+        )
 
     def forward(
             self,
@@ -228,4 +265,6 @@ class UpsampleBlock(nn.Module):
         Returns:
             the fused feature map of shape (B, out_channels, H*2, W*2), ready for residual processing
         """
-        pass
+        x = self.upsample(x)
+
+        return x + skip
