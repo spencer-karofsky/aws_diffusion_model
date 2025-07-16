@@ -1,5 +1,5 @@
 """
-dalle2.py: Implements the DALL·E 2 architecture, used for generating images conditioned on text prompts.
+dalle2.py: Runs inference on the DALL·E 2 architecture, used for generating images conditioned on text prompts.
 
 Description:
     * DALL·E 2 Consists of two Primary Components:
@@ -58,11 +58,7 @@ class DALLe2:
 
         Example Usage:
             from dalle2 import DALLe2
-
-            # Instantiate DALL·E 2 architecture
             dalle = DALLe2(...)
-
-            # Generate images
             prompts = [
                 'a plaid sports car',
                 'panda juggling chairs',
