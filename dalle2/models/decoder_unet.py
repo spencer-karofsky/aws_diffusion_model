@@ -43,6 +43,7 @@ import torch.nn as nn
 
 # Module imports
 from attention import SelfAttention2d
+from shared_modules import DownsampleBlock, UpsampleBlock, ResidualBlock, ConditioningProjector
 
 # Other imports
 from typing import Tuple
@@ -95,13 +96,119 @@ class DecoderUNet(nn.Module):
         self.residual_blocks = residual_blocks
         self.debug = debug
 
-        # Define 
+        # Define Conditioning Projector
+        self.conditioning_projector = ConditioningProjector(
+            input_dim=self.conditional_embedding_dim,
+            hidden_dim=self.conditional_embedding_dim
+        )
+
+        # Define Input Projection
+        self.input_proj = nn.Conv2d(
+            in_channels=self.in_channels,
+            out_channels=self.base_channels * self.channel_multipliers[0],
+            kernel_size=3,
+            padding=1
+        )
+
+        # Define U-Net downsampling layers
+        self.downsample_layers = nn.ModuleList()
+        for i in range(len(self.channel_multipliers) - 1):
+            self.downsample_layers.append(
+                DownsampleBlock(
+                    in_channels=base_channels * self.channel_multipliers[i],
+                    out_channels=base_channels * self.channel_multipliers[i + 1]
+                )
+            )
+
+        # Define downsampling residual blocks
+        self.encoder_res_blocks = nn.ModuleList()
+        for i in range(len(self.channel_multipliers) - 1):
+            blocks = nn.ModuleList()
+            for _ in range(self.residual_blocks):
+                blocks.append(ResidualBlock(
+                    in_channels=base_channels * self.channel_multipliers[i],
+                    out_channels=base_channels * self.channel_multipliers[i],
+                    cond_dim=self.conditional_embedding_dim
+                ))
+            self.encoder_res_blocks.append(blocks)
+
+        # Define bottleneck layers
+        bottleneck_dim = self.base_channels * self.channel_multipliers[-1]
+        self.bottleneck_blocks = nn.ModuleList([
+            ResidualBlock(
+                in_channels=bottleneck_dim,
+                out_channels=bottleneck_dim,
+                cond_dim=self.conditional_embedding_dim
+            ),
+            SelfAttention2d(bottleneck_dim),
+            ResidualBlock(
+                in_channels=bottleneck_dim,
+                out_channels=bottleneck_dim,
+                cond_dim=self.conditional_embedding_dim
+            )
+        ])
+
+        # Define U-Net upsampling layers (reverse order)
+        self.upsample_layers = nn.ModuleList()
+        for i in reversed(range(len(self.channel_multipliers) - 1)):
+            self.upsample_layers.append(
+                UpsampleBlock(
+                    in_channels=base_channels * self.channel_multipliers[i + 1],
+                    out_channels=base_channels * self.channel_multipliers[i]
+                )
+            )
+        
+        # Define upsampling residual blocks
+        self.decoder_res_blocks = nn.ModuleList()
+        for i in reversed(range(len(self.channel_multipliers) - 1)):
+            blocks = nn.ModuleList()
+            for _ in range(self.residual_blocks):
+                blocks.append(ResidualBlock(
+                    in_channels=base_channels * self.channel_multipliers[i],
+                    out_channels=base_channels * self.channel_multipliers[i],
+                    cond_dim=self.conditional_embedding_dim
+                ))
+            self.decoder_res_blocks.append(blocks)
+        
+        # Define Output Projection
+        self.output_proj = nn.Conv2d(
+            in_channels=self.base_channels * self.channel_multipliers[0],
+            out_channels=self.in_channels,
+            kernel_size=3,
+            padding=1
+        )
+
+        # Add attention capabilities
+        self.encoder_attn_blocks = nn.ModuleList()
+        self.decoder_attn_blocks = nn.ModuleList()
+
+        # Track spatial resolution at each level
+        resolution = image_size
+        for i in range(len(self.channel_multipliers) - 1):
+            channels = base_channels * channel_multipliers[i]
+
+            if resolution in attention_resolutions:
+                self.encoder_attn_blocks.append(SelfAttention2d(channels))
+            else:
+                self.encoder_attn_blocks.append(None)
+
+            resolution //= 2 # halve resolution after each downsample
+
+        # Do the same for upsampling (reverse)
+        for i in reversed(range(len(self.channel_multipliers) - 1)):
+            channels = base_channels * channel_multipliers[i]
+
+            if resolution in attention_resolutions:
+                self.decoder_attn_blocks.append(SelfAttention2d(channels))
+            else:
+                self.decoder_attn_blocks.append(None)
+
+            resolution *= 2 # double resolution after each upsample
 
         # AWS configuration, if training on AWS
         if on_aws:
             raise NotImplementedError
         
-    
     def forward(
             self,
             x_t: torch.Tensor,
@@ -109,7 +216,13 @@ class DecoderUNet(nn.Module):
             t_emb: torch.Tensor,
     ) -> torch.Tensor:
         """
-        Defines the forward propagation through the U-Net.
+        Defines the forward propagation through the U-Net:
+            1. Fuse conditioning vectors, t_emb and z_img.
+            2. Project the noisy image, x_t.
+            3. Perform downsampling on the noisy image projection.
+            4. Propagate downsampling output through the bottleneck, injecting the conditioning vectors into the residual blocks.
+            5. Propagate bottleneck output through the upsampling layers.
+            6. Project the output of the upsampling layers.
 
         Args:
             x_t: the noisy image at timestep t, of shape (B, in_channels, image_size (H), image_size (W))
@@ -119,5 +232,38 @@ class DecoderUNet(nn.Module):
         Returns:
             the predicted batch of clean images, x-hat_0
         """
-        pass
+        # Step 1. Fuse conditioning vectors, t_emb and z_img
+        cond_emb = self.conditioning_projector(
+            t_emb=t_emb,
+            z_img=z_img
+        )
 
+        # Step 2. Project the noisy image, x_t
+        x = self.input_proj(x_t)
+
+        # Step 3. Perform downsampling on the noisy image projection
+        skip_connections = []
+        for i, down in enumerate(self.downsample_layers):
+            for res_block in self.encoder_res_blocks[i]:
+                x = res_block(x, cond_emb)
+                if self.encoder_attn_blocks[i] is not None:
+                    x = self.encoder_attn_blocks[i](x)
+            skip_connections.append(x)
+            x = down(x)
+
+        # Step 4. Propagate downsampling output through the bottleneck, injecting the conditioning vectors into the residual blocks
+        x = self.bottleneck_blocks[0](x, cond_emb) # ResidualBlock
+        x = self.bottleneck_blocks[1](x) # SelfAttention2d
+        x = self.bottleneck_blocks[2](x, cond_emb) # ResidualBlock
+
+        # Step 5. Propagate bottleneck output through the upsampling layers
+        for i, up in enumerate(self.upsample_layers):
+            skip = skip_connections.pop()
+            x = up(x, skip)
+            for res_block in self.decoder_res_blocks[i]:
+                x = res_block(x, cond_emb)
+                if self.decoder_attn_blocks[i] is not None:
+                    x = self.decoder_attn_blocks[i](x)
+
+        # Step 6. Project the output of the upsampling layers
+        return self.output_proj(x)
