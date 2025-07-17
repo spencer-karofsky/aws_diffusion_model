@@ -32,7 +32,7 @@ class TimestepEmbedder(nn.Module):
             t_emb = time_emb.forward(timesteps)
 
         Args:
-            dim: embedding dimension (typically 512)
+            dim: embedding dimension (512)
         """
         super().__init__()
         self.dim = dim
@@ -63,10 +63,11 @@ class TimestepEmbedder(nn.Module):
         half_dim = self.dim // 2
         emb = math.log(10000) / (half_dim - 1)
         emb = torch.exp(torch.arange(half_dim, device=timesteps.device) * -emb)
-        emb = timesteps[:, None].float() * emb[None, :]
+        timesteps = timesteps.view(-1)
+        emb = timesteps.float().unsqueeze(1) * emb.unsqueeze(0)
+
 
         # Concat Sine and Cosine components
         emb = torch.cat([torch.sin(emb), torch.cos(emb)], dim=1)
 
-        # Pass emb through MLP
         return self.mlp(emb)

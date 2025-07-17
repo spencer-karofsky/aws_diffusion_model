@@ -43,7 +43,7 @@ import torch.nn as nn
 
 # Module imports
 from dalle2.models.attention import SelfAttention2d
-from shared_modules import DownsampleBlock, UpsampleBlock, ResidualBlock, ConditioningProjector
+from dalle2.models.shared_modules import DownsampleBlock, UpsampleBlock, ResidualBlock, ConditioningProjector
 
 # Other imports
 from typing import Tuple

@@ -94,14 +94,14 @@ class PriorTransformer(nn.Module):
             the predicted noise of the CLIP image embedding, eps_theta, of shape (B, 512)
         """
         # Add timestep embedding to the image embedding, z_T.
-        query = z_T + t_emb
+        query = z_T + t_emb.unsqueeze(1)
 
         # Stack query (z_T + t_emb) and key/value (z_txt) with positional encodings.
         query = query.unsqueeze(1) + self.pos_emb[:, 0, :]
         memory = z_txt.unsqueeze(1) + self.pos_emb[:, 1, :]
 
         # Decode using TransformerDecoder.
-        decoded = self.decoder(tgt=query, memory=memory)
+        decoded = self.decoder(tgt=query.squeeze(1), memory=memory.squeeze(1))
 
         # Project output back to latent dimension.
         eps_pred = self.output_proj(decoded.squeeze(1))

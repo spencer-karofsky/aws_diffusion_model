@@ -29,11 +29,11 @@ Author:
 import torch
 
 # Module imports
-from prior import Prior
-from decoder import Decoder
-from clip_encoding import CLIPEncoder
+from dalle2.models.prior import Prior
+from dalle2.models.decoder import Decoder
+from dalle2.models.clip_encoding import CLIPEncoder
 
-from sampling.ddim_sampling import DDIMSampler
+from dalle2.sampling.ddim_sampling import DDIMSampler
 
 # Other imports
 import os

@@ -25,7 +25,7 @@ import torch
 import torch.nn as nn
 
 # Module imports
-from noise_scheduler import NoiseScheduler
+from dalle2.sampling.noise_scheduler import NoiseScheduler
 
 # Other imports
 from typing import Tuple

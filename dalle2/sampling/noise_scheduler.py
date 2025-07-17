@@ -97,3 +97,26 @@ class NoiseScheduler:
             tensor of shape (B) with alpha-bar values.
         """
         return self.alpha_bar_t[t]
+    
+    def add_noise(
+            self,
+            clean_input: torch.Tensor,
+            t: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Adds noise to clean_input at timestep t, returning noised input and the noise used.
+
+        Args:
+            clean_input: Original (clean) data, e.g. CLIP image embeddings, shape (B, D)
+            t: Timestep indices, shape (B,)
+
+        Returns:
+            z_t: Noised input, shape (B, D)
+            noise: The Gaussian noise that was added, shape (B, D)
+        """
+        device = clean_input.device
+        noise = torch.randn_like(clean_input)
+        alpha_bar = self.get_alpha_bar(t).to(device).view(-1, 1)  # (B, 1)
+
+        z_t = torch.sqrt(alpha_bar) * clean_input + torch.sqrt(1 - alpha_bar) * noise
+        return z_t, noise

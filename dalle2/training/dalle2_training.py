@@ -22,11 +22,11 @@ import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 
 # Module imports
-from models.prior import Prior
-from models.decoder import Decoder
-from models.dalle2 import DALLe2
+from dalle2.models.prior import Prior
+from dalle2.models.decoder import Decoder
 
-from sampling.noise_scheduler import NoiseScheduler
+from dalle2.utils.embeddings import get_timestep_embedding
+from dalle2.sampling.noise_scheduler import NoiseScheduler
 
 # Other imports
 from abc import ABC, abstractmethod
@@ -75,7 +75,8 @@ class BaseTrainer(ABC):
             dataset,
             batch_size=batch_size,
             shuffle=shuffle,
-            num_workers=num_workers
+            # num_workers=num_workers
+            num_workers=0
         )
 
         # Assign device, ideally using a GPU-accelerated framework
@@ -207,17 +208,21 @@ class BaseTrainer(ABC):
             
             # Wrap the dataloader with tqdm for a batch-level progress bar
             for batch_i, batch in enumerate(tqdm(self.dataloader, desc='Training', leave=True)): # leave=True keeps each progress bar after training
-                inputs, targets = batch
-                inputs, targets = inputs.to(self.device), targets.to(self.device)
+                # Unpack the four components of the batch
+                z_T, z_txt, t, target_noise = batch
+                z_T = z_T.to(self.device)
+                z_txt = z_txt.to(self.device)
+                t = t.to(self.device)
+                target_noise = target_noise.to(self.device)
 
-                # Forward Pass
+                # compute timestep embeddings inside the trainer
                 target_pred = self._run_batch(
-                    batch_input=inputs
+                    batch_input=(z_T, z_txt, t)
                 )
 
-                # Compute Batch Loss
+                # Compute loss between predicted and true noise
                 loss = self._compute_batch_loss(
-                    target=targets,
+                    target=target_noise,
                     predicted=target_pred
                 )
 
@@ -255,12 +260,16 @@ class PriorTrainer(BaseTrainer):
             the predicted target
         """
         # Extract the text embedding, the timestep embedding, and the fully-noised imaage (DDPM-defined)
-        z_T, z_txt, t_emb = batch_input
+        if self.debug:
+            print(f"Batch structure: {type(batch_input)}, len: {len(batch_input)}")
+            print(f"Batch content: {[type(b) for b in batch_input]}")
+
+        z_T, z_txt, t = batch_input
 
         # Forward pass
         return self.train_module.forward(
             z_txt=z_txt,
-            t_emb=t_emb,
+            t=t,
             z_T=z_T
         )
     

@@ -38,11 +38,11 @@ import torch
 import torch.nn as nn
 
 # Module imports
-from decoder_unet import DecoderUNet
-from timestep_embedding import TimestepEmbedder
+from dalle2.models.decoder_unet import DecoderUNet
+from dalle2.models.timestep_embedding import TimestepEmbedder
 
-from sampling.noise_scheduler import NoiseScheduler
-from sampling.ddim_sampling import DDIMSampler
+from dalle2.sampling.noise_scheduler import NoiseScheduler
+from dalle2.sampling.ddim_sampling import DDIMSampler
 
 class Decoder(nn.Module):
     def __init__(

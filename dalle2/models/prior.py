@@ -43,8 +43,8 @@ import torch.nn as nn
 from dalle2.models.prior_transformer import PriorTransformer
 from dalle2.models.timestep_embedding import TimestepEmbedder
 
-from sampling.noise_scheduler import NoiseScheduler
-from sampling.ddim_sampling import DDIMSampler
+from dalle2.sampling.noise_scheduler import NoiseScheduler
+from dalle2.sampling.ddim_sampling import DDIMSampler
 
 class Prior(nn.Module):
     def __init__(
