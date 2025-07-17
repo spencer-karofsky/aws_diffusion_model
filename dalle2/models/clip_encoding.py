@@ -28,7 +28,7 @@ import open_clip
 from PIL import Image
 from typing import List, Union
 
-class CLIPEmbedder(nn.Module):
+class CLIPEncoder(nn.Module):
     def __init__(
             self,
             model_name: str = "ViT-B-32",
@@ -82,9 +82,9 @@ class CLIPEmbedder(nn.Module):
         tokens = self.tokenizer(texts).to(self.device)
         with torch.no_grad():
             # Run the transformer encoder directly
-            x = self.model.token_embedding(tokens)  # [B, 77, D]
-            x = x + self.model.positional_embedding  # Add positional embeddings
-            x = self.model.transformer(x)  # Run through transformer
+            x = self.model.token_embedding(tokens)
+            x = x + self.model.positional_embedding
+            x = self.model.transformer(x)
         return x
     
     def encode_text(

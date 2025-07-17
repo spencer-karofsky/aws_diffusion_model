@@ -50,6 +50,7 @@ class DALLe2:
             H: int,
             W: int,
             T: int = 1000,
+            num_inference_timesteps: int = 30,
             on_aws: bool = False,
             debug: bool = False
     ):
@@ -75,6 +76,7 @@ class DALLe2:
             H: image height (pixels)
             W: image width (pixels)
             T: total amount of noising/denoising timesteps
+            num_inference_timesteps: choose somewhere between 20 and 50 for the optimal quality/speed tradeoff
             on_aws: configures everything for AWS (TODO need to define this functionality out more when migrating training to AWS)
             debug: outputs relevant information (useful for debugging)
         """
@@ -92,7 +94,7 @@ class DALLe2:
             if not os.path.exists(decoder_path):
                 raise FileNotFoundError(f'Decoder checkpoint not found at: {decoder_path}')
 
-            self.prior = Prior()
+            self.prior = Prior(device=self.device)
             self.prior.load_state_dict(torch.load(prior_path, map_location=self.device))
             self.prior.eval()
             if debug:
@@ -121,10 +123,8 @@ class DALLe2:
         self.debug = debug
 
         # Timesteps configuration
-        STEPS = 25 # for the optimal quality/speed tradeoff, choose somewhere between 20 and 50 ()
         self.TIMESTEP_DIM = 512 # Use same dimenstionality as for the other inputs (not a strict requirement, but maintains consistency)
-
-        self.t = torch.linspace(T - 1, 0, steps=STEPS, dtype=torch.long)
+        self.t = torch.linspace(T - 1, 0, steps=num_inference_timesteps, dtype=torch.long)
         
         # AWS configuration
         if on_aws:
@@ -135,7 +135,7 @@ class DALLe2:
             captions: Union[str, List[str]]
     ) -> torch.Tensor:
         """
-        Generate images conditioned on text captions/prompts, x-hat_0
+        Generate images conditioned on text captions/prompts, x-hat_0.
 
         Args:
             captions: either one (str) or multiple (list-form) text prompts to condition DALL·E 2 (maximum of 77 tokens per prompt)
@@ -143,47 +143,21 @@ class DALLe2:
         Returns:
             img_generations: the images conditioned on the text prompts (of shape (len(captions), 3, H, W), where H and W are the image height and width (px))
         """
-        # Prior Inference: Predicts Image Embeddings
-        # 1. CLIP-embeds text captions (List[str] (len=n) | str (len=n=1) -> Tensor(N, 512))
+        # Encode text captions with CLIP, resulting in the text embeddings
         if isinstance(captions, str):
             captions = [captions]
         
-        N = len(captions)
-
         text_emb = self.clip_encoder.encode_text(captions)
 
-        # 2. Timestep-embeds the timesteps, resulting in the Projected Timestep Embedding
-        # t: Tensor(N,) -> Sinusoidal Embedding: -> NN) (Tensor(self.STEPS,) -> t_emb: Tensor(N, 512)
-        timesteps_embedded = self.prior.timestep_embed(self.t)
-
-        # 3. Generate Pure Gaussian Noise Timestep Tensors, z_T (Tensor(N, 512))
-        noisy_timesteps = torch.randn((N, self.TIMESTEP_DIM), device=self.device)
-
-        # 4. Pass tensors in Steps 1-3 through the trained prior (decoder-only Transformer with causal attention)
-        # Transformer Output: Predicted CLIP Image Embeddings, z-hat_img (Tensor(N, 512))
+        # Generate the image embeddings (using the trained prior) given the text embeddings
         image_embeddings_pred = self.prior.sample(
             z_txt=text_emb,
-            t_emb=timesteps_embedded,
-            z_T=noisy_timesteps
+            sampler=self.prior_sampler,
+            steps=len(self.t)
         )
 
-        # Decoder Inference: Predicts Clean Image(s)
-        # 1. Generate N pure Gaussian noise images, x_T (Tensor(N, 3, H, W))
-        noisy_images = torch.randn((N, 3, self.H, self.W), device=self.device)
-
-        # 2. Timestep-embeds the timesteps, resulting in the Projected Timestep Embedding
-        # t: Tensor(N,) -> Sinusoidal Embedding: -> NN) (Tensor(self.STEPS,) -> t_emb: Tensor(N, 512)
-        # We train a separate timestep projection Neural Network because the prior and decoder have different training objectives.
-        timesteps_embedded = self.decoder.timestep_embed(self.t)
-
-        # 3. Pass x_T, t_emb, and z_img into the Denoising U-Net
-        # Output of the U-Net is a Tensor of shape: (N, 3, H, W)
-        # N images, 3 color channels (RGB), HxW-pixel images
-        generated_images = self.decoder.sample(
-            z_emb_pred=image_embeddings_pred,
-            t_emb=timesteps_embedded,
-            x_T=noisy_images
-        )
+        # Generate the clean images (using the decoder) given the image embeddings
+        generated_images = self.decoder.sample(z_emb_pred=image_embeddings_pred)
 
         if self.debug:
             raise NotImplementedError

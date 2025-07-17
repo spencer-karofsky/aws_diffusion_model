@@ -40,8 +40,8 @@ import torch
 import torch.nn as nn
 
 # Module imports
-from prior_transformer import PriorTransformer
-from timestep_embedding import TimestepEmbedder
+from dalle2.models.prior_transformer import PriorTransformer
+from dalle2.models.timestep_embedding import TimestepEmbedder
 
 from sampling.noise_scheduler import NoiseScheduler
 from sampling.ddim_sampling import DDIMSampler
@@ -51,6 +51,7 @@ class Prior(nn.Module):
         self,
         device: torch.device,
         T: int = 1000,
+        num_inference_steps: int = 30,
         on_aws: bool = False,
         debug: bool = False 
     ):
@@ -67,6 +68,7 @@ class Prior(nn.Module):
         Args:
             device: the PyTorch device (tries to use the GPU)
             T: the total number of noising/denoising timesteps (total for each individually, not total of both combined)
+            num_inference_steps: number of inference steps (to uniformly sample from T total timesteps)
             on_aws: configures for AWS (TODO Configure script for AWS)
             debug: debug: outputs relevant information (useful for debugging)
         """
@@ -91,7 +93,11 @@ class Prior(nn.Module):
 
         # Initialize DDIM Sampler (DDIMSampler.sample is a fully-deterministic process)
         noise_scheduler = NoiseScheduler(T=T)
-        self.sampler = DDIMSampler(noise_scheduler=noise_scheduler)
+        self.sampler = DDIMSampler(
+            noise_scheduler=noise_scheduler,
+            num_inference_steps=num_inference_steps,
+            eta=0.0  # Fully-deterministic DDIM
+        )
 
         # AWS configuration, if training on AWS
         if on_aws:
@@ -100,7 +106,7 @@ class Prior(nn.Module):
     def forward(
             self,
             z_txt: torch.Tensor,
-            t_emb: torch.Tensor,
+            t: torch.Tensor,
             z_T: torch.Tensor
     ) -> torch.Tensor:
         """
@@ -109,12 +115,16 @@ class Prior(nn.Module):
 
         Args:
             z_txt: the CLIP text embeddings, of shape (B, 512) (B=batch size)
-            t_emb: the projected timesteps, of shape (B, 512)
+            t: the timesteps (to be projected), of shape (B,)
             z_T: the noisy CLIP image embeddings we seek to denoise (noised by the DDPM forward diffusion process), of shape (B, 512)
         
         Returns:
             the predicted noise of the CLIP image embedding, eps_theta, of shape (B, 512)
         """
+        # Project timesteps
+        t_emb = self.timestep_embedder(t)
+
+        # Call PriorTransformer.forward
         return self.prior_transformer.forward(
             z_txt=z_txt,
             z_T=z_T,
@@ -125,16 +135,16 @@ class Prior(nn.Module):
     def sample(
             self,
             z_txt: torch.Tensor,
-            sampler: DDIMSampler,
-            steps: int = 25
+            sampler: DDIMSampler = None,
+            steps: int = None
     ) -> torch.Tensor:
         """
         Defines the full forward pass of the prior (used during inference only)
 
         Args:
             z_txt: the CLIP text embeddings, of shape (B, 512) (B=batch size)
-            sampler: the DDIM sampler, which runs the reverse diffusion process to generate a clean sample from noise. 
-            steps: number of timesteps to use in the reverse diffusion loop
+            sampler: the DDIM sampleer
+            steps: number of inference steps
         
         Returns:
             z_hat_img: the predicted CLIP image embeddings, of shape (B, 512)
@@ -142,11 +152,11 @@ class Prior(nn.Module):
         # Get the batch size, B
         B = z_txt.size(0)
 
+        sampler = sampler or self.sampler
         # Call DDIMSampler.sample
         return sampler.sample(
             model=self,
             z_cond=z_txt,
             shape=(B, 512),
-            steps=steps,
-            T=self.T
+            steps=steps  # optional override
         )
