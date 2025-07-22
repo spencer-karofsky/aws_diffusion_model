@@ -161,3 +161,32 @@ class CLIPEncoder(nn.Module):
 
         combined = torch.stack([start, mean, end], dim=1)  # [B, 3, 512]
         return combined
+    
+    def encode_text_ensemble(
+        self,
+        texts: List[str],
+        n: int = 3
+    ) -> torch.Tensor:
+        """
+        Returns multiple stochastic CLIP text embeddings per prompt using dropout.
+
+        Args:
+            texts: list of text prompts
+            n: number of stochastic embeddings per prompt
+
+        Returns:
+            Tensor of shape [B, n, 512]
+        """
+        tokens = self.tokenizer(texts).to(self.device)
+        embeddings = []
+
+        self.model.train()  # Enables dropout for stochastic encoding
+        for _ in range(n):
+            with torch.no_grad():
+                features = self.model.encode_text(tokens)  # [B, 512]
+                features /= features.norm(dim=-1, keepdim=True)
+            embeddings.append(features)
+
+        self.model.eval()  # Reset back to eval mode
+        return torch.stack(embeddings, dim=1)  # [B, n, 512]
+

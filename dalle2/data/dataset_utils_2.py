@@ -102,11 +102,11 @@ class COCOPriorDataset(Dataset):
             raise FileNotFoundError(f"Image not found at {img_path}")
 
         image = Image.open(img_path).convert("RGB")
-        image_tensor = self.transform(image).unsqueeze(0).to(self.device)  # shape: (1, 3, H, W)
+        image_tensor = self.transform(image).unsqueeze(0).to(self.device) # shape: (1, 3, H, W)
 
         with torch.no_grad():
-            z_txt = self.clip_encoder.encode_text([caption]).to(self.device)  # shape: (1, 512)
-            z_img = self.clip_encoder.encode_image(image_tensor).to(self.device)  # shape: (1, 512)
+            z_txt = self.clip_encoder.encode_text_ensemble([caption], n=3).to(self.device) # shape: (1, 3, 512)
+            z_img = self.clip_encoder.encode_image(image_tensor).to(self.device) # shape: (1, 512)
 
         # Sample timestep
         t = torch.randint(0, self.T, (1,), device=self.device).long()

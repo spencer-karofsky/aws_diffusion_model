@@ -51,7 +51,6 @@ class PriorTransformer(nn.Module):
         super().__init__()
 
         self.debug = debug
-        self.debug = True
 
         # Positional encoding
         self.pos_emb = nn.Parameter(torch.randn(1, 4, dim))

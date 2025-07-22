@@ -174,36 +174,6 @@ class DDIMSampler:
 
         Args:
             model: the trained denoising model
-            z_cond: conditioning vector, of shape (B, D)
-            shape: Shape of output (B, C, H, W)
-            steps: number of inference steps
-
-        Returns:
-            final denoised sample x_0, of shape (B, C, H, W)
-        """
-        effective_steps = steps if steps is not None else self.num_inference_steps
-        timesteps = torch.linspace(
-            len(self.scheduler.alpha_bar_t) - 1,
-            0,
-            effective_steps,
-            dtype=torch.long,
-            device=z_cond.device
-        )
-        pass
-    
-    @torch.no_grad()
-    def sample(
-            self,
-            model: nn.Module,
-            z_cond: torch.Tensor,
-            shape: Tuple[int, int, int, int],
-            steps: int = None
-    ) -> torch.Tensor:
-        """
-        Performs DDIM sampling using the given model and conditioning.
-
-        Args:
-            model: the trained denoising model
             z_cond: conditioning vector, of shape (B, 512)
             shape: Shape of output (B, C, H, W)
             steps: number of inference steps
@@ -229,7 +199,19 @@ class DDIMSampler:
             if hasattr(model, 'debug') and model.debug:
                 print(f'[DDIMSampler.sample] Step {i}/{steps} — t = {t_i.item()}')
 
-            eps_pred = model(x_t, z_cond, t)
+            if model.__class__.__name__ == 'Prior':
+                eps_pred = model(
+                    z_txt=z_cond,
+                    t=t,
+                    z_T=x_t
+                )
+            elif model.__class__.__name__ == 'Decoder':
+                eps_pred = model(
+                    x_t=x_t,
+                    z_img=z_cond,
+                    t=t,   
+                )
+
             x0_pred = self._predict_x0(x_t, eps_pred, t)
 
             if i == steps - 1:

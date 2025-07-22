@@ -123,12 +123,14 @@ class Prior(nn.Module):
         Returns:
             the predicted noise of the CLIP image embedding, eps_theta, of shape (B, 512)
         """
+        assert t.dim() == 1, f'[Prior.forward] Expected shape (B,), got {t.shape}'
         t_emb = self.timestep_embedder(t)
 
         if not self.training and z_txt.dim() == 2 and z_txt.size(1) == 512:
             if self.debug:
                 print(f'[Prior.forward] In eval mode: repeating z_txt (B, 512) to (B, 3, 512)')
             z_txt = z_txt.unsqueeze(1).expand(-1, 3, 512)
+
         # Squeeze any extra dims
         extra_dims = t.dim() - 2
         for _ in range(extra_dims):
@@ -193,7 +195,7 @@ class Prior(nn.Module):
         Defines the full forward pass of the prior (used during inference only)
 
         Args:
-            z_txt: the CLIP text embeddings, of shape (B, 512) (B=batch size)
+            z_txt: the CLIP text embeddings, of shape (B, 3, 512) (B=batch size)
             sampler: the DDIM sampleer
             steps: number of inference steps
         
@@ -203,17 +205,19 @@ class Prior(nn.Module):
         B = z_txt.size(0)
 
         # Normalize input shape to (B, 3, 512)
-        if z_txt.dim() == 2 and z_txt.size(1) == 3 * 512:
-            z_txt = z_txt.view(B, 3, 512)
-        elif z_txt.dim() == 3 and z_txt.size(1) == 1:
-            z_txt = z_txt.expand(B, 3, 512)
-        elif z_txt.dim() == 4 and z_txt.size(1) == 1:
-            z_txt = z_txt.view(B, z_txt.shape[2], z_txt.shape[3])
-
-        # Reduce to (B, 512)
-        z_txt = z_txt.mean(dim=1)
-
-        assert z_txt.shape == (B, 512), f'[Prior.sample] z_txt must be shape (B, 512), got {z_txt.shape}'
+        if z_txt.dim() != 2 or z_txt.size(0) != B or z_txt.size(1) != 512:
+            if z_txt.dim() == 2 and z_txt.size(1) == 3 * 512:
+                z_txt = z_txt.view(B, 3, 512)
+            elif z_txt.dim() == 3 and z_txt.size(1) == 1:
+                z_txt = z_txt.expand(B, 3, 512)
+            elif z_txt.dim() == 4 and z_txt.size(1) == 1:
+                z_txt = z_txt.view(B, z_txt.shape[2], z_txt.shape[3])
+            elif z_txt.dim() == 2:
+                z_txt = z_txt.view(B, 3, 512)
+            
+            assert z_txt.shape == (B, 3, 512), f'[Prior.sample] z_txt must be shape (B, 3, 512), got {z_txt.shape}'
+        else:
+            raise Exception(f'[Prior.sample]z_txt must be (B, 3, 512), got {z_txt.shape}')
 
         if self.debug:
             print(f'[Prior.sample] z_txt final shape: {z_txt.shape}')
