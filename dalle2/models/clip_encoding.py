@@ -71,13 +71,16 @@ class CLIPEncoder(nn.Module):
                 self,
                 texts: List[str]
     ) -> torch.Tensor:
-        """Converts a prompt to a per-token CLIP embedding.
-        - Embeds fine-grained details of the input caption.
-        - Input (1) to the diffusion prior.
+        """
+        Converts a prompt to a per-token CLIP embedding.
+            * Embeds fine-grained details of the input caption.
+            * Input (1) to the diffusion prior.
+
         Args:
             texts: list of text strings (prompts) (e.g., ['a dog sitting on a beach', 'an astronaut riding a horse'])
+
         Returns:
-            [B, 77, D] tensor of text embeddings (one 512-dimension vector per token).
+            [B, 77, 512] tensor of text embeddings (one 512-dimension vector per token).
         """
         tokens = self.tokenizer(texts).to(self.device)
         with torch.no_grad():
@@ -91,13 +94,16 @@ class CLIPEncoder(nn.Module):
                 self,
                 texts: List[str]
     ) -> torch.Tensor:
-        """Converts a prompt to CLIP text embedding.
-        - Embeds global context of the input caption.
-        - Input (2) to the diffusion prior.
+        """
+        Converts a prompt to CLIP text embedding.
+            * Embeds global context of the input caption.
+            * Input (2) to the diffusion prior.
+
         Args:
             texts: list of text strings (prompts) (e.g., ['a dog sitting on a beach', 'an astronaut riding a horse'])
+        
         Returns:
-            [B, D] tensor of text embeddings (one 512-dimension vector per prompt).
+            [B, 512] tensor of text embeddings (one 512-dimension vector per prompt)
         """
         tokens = self.tokenizer(texts).to(self.device)
         with torch.no_grad():
@@ -109,8 +115,14 @@ class CLIPEncoder(nn.Module):
                 self,
                 images: Union[List[Image.Image], torch.Tensor]
     ) -> torch.Tensor:
-        """Converts images to CLIP image embeddings.
-        Accepts either a list of PIL images or a batch tensor.
+        """
+        Converts images to CLIP image embeddings.
+
+        Args:
+            images: either a list of PIL images or a batch tensor
+
+        Returns:
+            [B, 512] CLIP image embeddings
         """
         if isinstance(images, torch.Tensor):
             # Convert batched tensor [B, 3, H, W] into list of PIL Images
@@ -123,3 +135,29 @@ class CLIPEncoder(nn.Module):
             image_features /= image_features.norm(dim=-1, keepdim=True)
 
         return image_features
+    
+    def encode_text_multilayer(
+        self,
+        texts: List[str],
+        layers: List[int] = [-5, -3, -1]
+    ) -> torch.Tensor:
+        """
+        Returns 3-layer text embedding from CLIP for each prompt.
+
+        Args:
+            texts: list of text strings (e.g., ['a cat', 'a dog'])
+            layers: which transformer layers to extract (default = [-5, -3, -1])
+
+        Returns:
+            Tensor of shape [B, 3, 512]
+        """
+        raise Exception('Check clip_encoding.py and likely use other method!')
+        token_embeddings = self.encode_text_tokens(texts)  # [B, 77, 512]
+        assert token_embeddings.dim() == 3 and token_embeddings.shape[1:] == (77, 512)
+
+        start = token_embeddings[:, 0]         # [B, 512]
+        mean = token_embeddings.mean(dim=1)    # [B, 512]
+        end = token_embeddings[:, -1]          # [B, 512]
+
+        combined = torch.stack([start, mean, end], dim=1)  # [B, 3, 512]
+        return combined

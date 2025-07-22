@@ -89,7 +89,9 @@ class DDIMSampler:
         Returns:
             reconstructed clean sample x_0, of shape (B, C, H, W)
         """
-        alpha_bar_t = self.scheduler.get_alpha_bar(t).view(-1, 1, 1, 1)
+        alpha_bar_t = self.scheduler.get_alpha_bar(t)
+        while len(alpha_bar_t.shape) < len(x_t.shape):
+            alpha_bar_t = alpha_bar_t.unsqueeze(-1)
         sqrt_alpha_bar = torch.sqrt(alpha_bar_t)
         sqrt_one_minus_alpha_bar = torch.sqrt(1.0 - alpha_bar_t)
         return (x_t - sqrt_one_minus_alpha_bar * eps_pred) / sqrt_alpha_bar
@@ -99,8 +101,8 @@ class DDIMSampler:
             x_t: torch.Tensor,
             x0_pred: torch.Tensor,
             eps_pred: torch.Tensor,
-            t: torch.Tensor,
-            t_prev: torch.Tensor,
+            t_current: torch.Tensor,
+            t_next: torch.Tensor,
     ) -> torch.Tensor:
         """
         Computes x_{t-1} using the DDIM update rule.
@@ -115,29 +117,57 @@ class DDIMSampler:
         Returns:
             x_{t-1} sample, of shape (B, C, H, W)
         """
-        alpha_bar_t     = self.scheduler.get_alpha_bar(t).view(-1, 1, 1, 1)
-        alpha_bar_prev  = self.scheduler.get_alpha_bar(t_prev).view(-1, 1, 1, 1)
+        # Check for NaNs
+        if torch.isnan(t_current).any():
+            raise Exception('[DDIMSampler._ddim_step] NaNs in t')
+        if torch.isnan(t_next).any():
+            raise Exception('[DDIMSampler._ddim_step] NaNs in t_prev')
+        
+        # Get alpha, alpha-bar values
+        alpha_bar_prev = self.scheduler.get_alpha_bar(t_current)
+        alpha_bar_t = self.scheduler.get_alpha_bar(t_next)
 
+        # Check for NaNs
+        if torch.isnan(alpha_bar_t).any():
+            raise Exception('[DDIMSampler._ddim_step] NaNs in alpha_bar_t. Check NoiseScheduler.get_alpha_bar')
+        if torch.isnan(alpha_bar_prev).any():
+            raise Exception('[DDIMSampler._ddim_step] NaNs in alpha_bar_prev. Check NoiseScheduler.get_alpha_bar')
+
+        while len(alpha_bar_t.shape) < len(x_t.shape):
+            alpha_bar_t = alpha_bar_t.unsqueeze(-1)
+            alpha_bar_prev = alpha_bar_prev.unsqueeze(-1)
+
+        # Compute sigma
         sigma = self.eta * torch.sqrt(
             (1 - alpha_bar_t) / (1 - alpha_bar_prev) * (1 - alpha_bar_prev / alpha_bar_t)
         )
-
+        # Check for NaNs
+        if torch.isnan(sigma).any():
+            raise Exception('[DDIMSampler._ddim_step] NaNs in sigma. Check for division by 0, division by near-0, or sqrt of negative value(s)')
+        
         noise = torch.randn_like(x_t) if self.eta > 0 else torch.zeros_like(x_t)
+        # Check for NaNs
+        if torch.isnan(noise).any():
+            raise Exception('[DDIMSampler._ddim_step] NaNs in noise')
 
         x_prev = (
             torch.sqrt(alpha_bar_prev) * x0_pred +
             torch.sqrt(1 - alpha_bar_prev - sigma**2) * eps_pred +
             sigma * noise
         )
+        # Check for NaNs
+        if torch.isnan(x_prev).any():
+            raise Exception('[DDIMSampler._ddim_step] NaNs in x_prev')
+        
         return x_prev
     
     @torch.no_grad()
     def sample(
-        self,
-        model: nn.Module,
-        z_cond: torch.Tensor,
-        shape: Tuple[int, int, int, int],
-        steps: int = None
+            self,
+            model: nn.Module,
+            z_cond: torch.Tensor,
+            shape: Tuple[int, int, int, int],
+            steps: int = None
     ) -> torch.Tensor:
         """
         Performs DDIM sampling using the given model and conditioning.
@@ -153,23 +183,59 @@ class DDIMSampler:
         """
         effective_steps = steps if steps is not None else self.num_inference_steps
         timesteps = torch.linspace(
-            len(self.scheduler.alpha_bar_t) - 1, 0, effective_steps, dtype=torch.long, device=z_cond.device
+            len(self.scheduler.alpha_bar_t) - 1,
+            0,
+            effective_steps,
+            dtype=torch.long,
+            device=z_cond.device
+        )
+        pass
+    
+    @torch.no_grad()
+    def sample(
+            self,
+            model: nn.Module,
+            z_cond: torch.Tensor,
+            shape: Tuple[int, int, int, int],
+            steps: int = None
+    ) -> torch.Tensor:
+        """
+        Performs DDIM sampling using the given model and conditioning.
+
+        Args:
+            model: the trained denoising model
+            z_cond: conditioning vector, of shape (B, 512)
+            shape: Shape of output (B, C, H, W)
+            steps: number of inference steps
+
+        Returns:
+            final denoised sample x_0, of shape (B, C, H, W)
+        """
+        steps = steps or self.num_inference_steps
+        timesteps = torch.linspace(
+            len(self.scheduler.alpha_bar_t) - 1,
+            0,
+            steps,
+            dtype=torch.long,
+            device=z_cond.device
         )
 
-        device = z_cond.device
         B = shape[0]
-        x_t = torch.randn(shape, device=device)
+        x_t = torch.randn(shape, device=z_cond.device)
 
         for i, t_i in enumerate(timesteps):
-            t = torch.full((B,), t_i.item(), device=device, dtype=torch.long)
+            t = torch.full((B,), t_i.item(), device=z_cond.device, dtype=torch.long)
 
-            eps_pred = model(x_t, t, z_cond)
+            if hasattr(model, 'debug') and model.debug:
+                print(f'[DDIMSampler.sample] Step {i}/{steps} — t = {t_i.item()}')
+
+            eps_pred = model(x_t, z_cond, t)
             x0_pred = self._predict_x0(x_t, eps_pred, t)
 
-            if i == len(timesteps) - 1:
+            if i == steps - 1:
                 return x0_pred
 
-            t_prev = torch.full((B,), timesteps[i + 1].item(), device=device, dtype=torch.long)
-            x_t = self._ddim_step(x_t, x0_pred, eps_pred, t, t_prev)
+            t_next = torch.full((B,), timesteps[i + 1].item(), device=z_cond.device, dtype=torch.long)
+            x_t = self._ddim_step(x_t, x0_pred, eps_pred, t, t_next)
 
-        return x_t  # Should never hit this unless num_inference_steps == 1
+        return x_t

@@ -78,6 +78,7 @@ class Prior(nn.Module):
         self.device = device
         self.T = T
         self.debug = debug
+        # self.debug = False
 
         # Timestep embedding network
         self.TIMESTEP_DIM = 512 # Keep at 512 (or update self.TIMESTEP_DIM in dalle2.DALLe2.generate so they match)
@@ -88,7 +89,8 @@ class Prior(nn.Module):
         self.prior_transformer = PriorTransformer(
             dim=DIM,
             transformer_blocks=BLOCKS,
-            attention_heads=HEADS
+            attention_heads=HEADS,
+            debug=self.debug
         )
 
         # Initialize DDIM Sampler (DDIMSampler.sample is a fully-deterministic process)
@@ -121,8 +123,56 @@ class Prior(nn.Module):
         Returns:
             the predicted noise of the CLIP image embedding, eps_theta, of shape (B, 512)
         """
+        t_emb = self.timestep_embedder(t)
+
+        if not self.training and z_txt.dim() == 2 and z_txt.size(1) == 512:
+            if self.debug:
+                print(f'[Prior.forward] In eval mode: repeating z_txt (B, 512) to (B, 3, 512)')
+            z_txt = z_txt.unsqueeze(1).expand(-1, 3, 512)
+        # Squeeze any extra dims
+        extra_dims = t.dim() - 2
+        for _ in range(extra_dims):
+           t = t.squeeze(1)
+        
+        extra_dims = z_T.dim() - 2
+        for _ in range(extra_dims):
+           z_T = z_T.squeeze(1)
+
+        # Validate shapes
+        assert t.dim() == 1, f'[Prior] t should have shape (B,), got {t.shape}'
+        assert z_T.dim() == 2 and z_T.size(1) == 512, f'[Prior] z_T expected shape (B, 512), got {z_T.shape}'
+
         # Project timesteps
         t_emb = self.timestep_embedder(t)
+
+        # Reshape z_txt here before passing it to PriorTransformer
+        B = z_txt.size(0)
+
+        if z_txt.dim() == 2 and z_txt.size(1) == 512 * 3:
+        # Flattened text embeddings (3 tokens x 512)
+            if self.debug:
+                print(f'[Prior] Reshaping z_txt from (B, 1536) to (B, 3, 512)')
+            z_txt = z_txt.view(B, 3, 512)
+
+        elif z_txt.dim() == 4 and z_txt.size(1) == 1:
+        # Comes in as (B, 1, 3, 512), squeeze to (B, 3, 512)
+            if self.debug:
+                print(f'[Prior] Reshaping z_txt from {z_txt.shape} to (B, 3, 512)')
+            z_txt = z_txt.view(B, z_txt.shape[2], z_txt.shape[3])
+        
+        elif z_txt.dim() == 3 and z_txt.shape[1] == 1:
+            # Comes in as (B, 1, 512) → repeat 3 times or error
+            if self.debug:
+                print(f'[Prior] z_txt came in as (B, 1, 512); repeating or broadcasting to (B, 3, 512)')
+            z_txt = z_txt.expand(B, 3, 512)
+
+        # Final shape check
+        assert z_txt.dim() == 3 and z_txt.shape[1:] == (3, 512), f'[Prior] z_txt must be (B, 3, 512), got {z_txt.shape}'
+
+        if self.debug:
+            print(f'[Prior] Final z_txt shape: {z_txt.shape}')
+            print(f'[Prior] t_emb shape: {t_emb.shape}')
+            print(f'[Prior] z_T shape: {z_T.shape}\n')
 
         # Call PriorTransformer.forward
         return self.prior_transformer.forward(
@@ -132,11 +182,12 @@ class Prior(nn.Module):
             device=self.device
         )
 
+    @torch.no_grad()
     def sample(
             self,
             z_txt: torch.Tensor,
             sampler: DDIMSampler = None,
-            steps: int = None
+            steps: int = None,
     ) -> torch.Tensor:
         """
         Defines the full forward pass of the prior (used during inference only)
@@ -149,14 +200,36 @@ class Prior(nn.Module):
         Returns:
             z_hat_img: the predicted CLIP image embeddings, of shape (B, 512)
         """
-        # Get the batch size, B
         B = z_txt.size(0)
 
+        # Normalize input shape to (B, 3, 512)
+        if z_txt.dim() == 2 and z_txt.size(1) == 3 * 512:
+            z_txt = z_txt.view(B, 3, 512)
+        elif z_txt.dim() == 3 and z_txt.size(1) == 1:
+            z_txt = z_txt.expand(B, 3, 512)
+        elif z_txt.dim() == 4 and z_txt.size(1) == 1:
+            z_txt = z_txt.view(B, z_txt.shape[2], z_txt.shape[3])
+
+        # Reduce to (B, 512)
+        z_txt = z_txt.mean(dim=1)
+
+        assert z_txt.shape == (B, 512), f'[Prior.sample] z_txt must be shape (B, 512), got {z_txt.shape}'
+
+        if self.debug:
+            print(f'[Prior.sample] z_txt final shape: {z_txt.shape}')
+            print(f'[Prior.sample] steps: {steps}')
+
+        # Default to self.sampler if not provided
         sampler = sampler or self.sampler
-        # Call DDIMSampler.sample
+
+        # Call DDIM sampler
         return sampler.sample(
             model=self,
             z_cond=z_txt,
             shape=(B, 512),
-            steps=steps  # optional override
+            steps=steps
         )
+    
+    def predict_eps(self, x_t, z_cond, t):
+        return self.forward(z_txt=z_cond, t=t, z_T=x_t)
+

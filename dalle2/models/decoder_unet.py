@@ -128,7 +128,8 @@ class DecoderUNet(nn.Module):
                 blocks.append(ResidualBlock(
                     in_channels=base_channels * self.channel_multipliers[i],
                     out_channels=base_channels * self.channel_multipliers[i],
-                    cond_dim=self.conditional_embedding_dim
+                    cond_dim=self.conditional_embedding_dim,
+                    debug=self.debug
                 ))
             self.encoder_res_blocks.append(blocks)
 
@@ -138,13 +139,15 @@ class DecoderUNet(nn.Module):
             ResidualBlock(
                 in_channels=bottleneck_dim,
                 out_channels=bottleneck_dim,
-                cond_dim=self.conditional_embedding_dim
+                cond_dim=self.conditional_embedding_dim,
+                debug=self.debug
             ),
             SelfAttention2d(bottleneck_dim),
             ResidualBlock(
                 in_channels=bottleneck_dim,
                 out_channels=bottleneck_dim,
-                cond_dim=self.conditional_embedding_dim
+                cond_dim=self.conditional_embedding_dim,
+                debug=self.debug
             )
         ])
 
@@ -154,7 +157,8 @@ class DecoderUNet(nn.Module):
             self.upsample_layers.append(
                 UpsampleBlock(
                     in_channels=base_channels * self.channel_multipliers[i + 1],
-                    out_channels=base_channels * self.channel_multipliers[i]
+                    out_channels=base_channels * self.channel_multipliers[i],
+                    debug=self.debug
                 )
             )
         
@@ -166,7 +170,8 @@ class DecoderUNet(nn.Module):
                 blocks.append(ResidualBlock(
                     in_channels=base_channels * self.channel_multipliers[i],
                     out_channels=base_channels * self.channel_multipliers[i],
-                    cond_dim=self.conditional_embedding_dim
+                    cond_dim=self.conditional_embedding_dim,
+                    debug=self.debug
                 ))
             self.decoder_res_blocks.append(blocks)
         
@@ -232,14 +237,29 @@ class DecoderUNet(nn.Module):
         Returns:
             the predicted batch of clean images, x-hat_0
         """
+        B, C, H, W = x_t.shape
+
+        assert x_t.dim() == 4, f'[DecoderUNet] Expected x_t to be 4D (B, C, H, W), got {x_t.shape}'
+        assert z_img.shape == (B, 512), f'[DecoderUNet] z_img shape mismatch: expected ({B}, 512), got {z_img.shape}'
+        assert t_emb.shape == (B, 512), f'[DecoderUNet] t_emb shape mismatch: expected ({B}, 512), got {t_emb.shape}'
+        
+        if self.debug:
+            print(f'[DecoderUNet] x_t shape: {x_t.shape} (expected: ({B}, {self.in_channels}, {H}, {W}))')
+            print(f'[DecoderUNet] z_img shape: {z_img.shape} (expected: ({B}, 512))')
+            print(f'[DecoderUNet] t_emb shape: {t_emb.shape} (expected: ({B}, 512))')
+
         # Step 1. Fuse conditioning vectors, t_emb and z_img
         cond_emb = self.conditioning_projector(
             t_emb=t_emb,
             z_img=z_img
         )
+        if self.debug:
+            print(f'[DecoderUNet] cond_emb shape: {cond_emb.shape} (expected: ({B}, 512))')
 
         # Step 2. Project the noisy image, x_t
         x = self.input_proj(x_t)
+        if self.debug:
+            print(f'[DecoderUNet] After input_proj: {x.shape}')
 
         # Step 3. Perform downsampling on the noisy image projection
         skip_connections = []
@@ -249,12 +269,16 @@ class DecoderUNet(nn.Module):
                 if self.encoder_attn_blocks[i] is not None:
                     x = self.encoder_attn_blocks[i](x)
             skip_connections.append(x)
+            if self.debug:
+                print(f'[DecoderUNet] After DownsampleBlock {i}, shape: {x.shape}')
             x = down(x)
 
         # Step 4. Propagate downsampling output through the bottleneck, injecting the conditioning vectors into the residual blocks
         x = self.bottleneck_blocks[0](x, cond_emb) # ResidualBlock
         x = self.bottleneck_blocks[1](x) # SelfAttention2d
         x = self.bottleneck_blocks[2](x, cond_emb) # ResidualBlock
+        if self.debug:
+            print(f'[DecoderUNet] After bottleneck: {x.shape}')
 
         # Step 5. Propagate bottleneck output through the upsampling layers
         for i, up in enumerate(self.upsample_layers):
@@ -264,6 +288,9 @@ class DecoderUNet(nn.Module):
                 x = res_block(x, cond_emb)
                 if self.decoder_attn_blocks[i] is not None:
                     x = self.decoder_attn_blocks[i](x)
-
+        
         # Step 6. Project the output of the upsampling layers
-        return self.output_proj(x)
+        out = self.output_proj(x)
+        assert out.shape == (B, self.in_channels, H, W), f'[DecoderUNet] Output shape mismatch: expected ({B}, {self.in_channels}, {H}, {W}), got {out.shape}'
+
+        return out

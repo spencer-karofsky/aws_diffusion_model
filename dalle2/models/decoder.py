@@ -76,6 +76,7 @@ class Decoder(nn.Module):
         self.device = device
         self.T = T
         self.debug = debug
+        self.debug = False
 
         # Timestep embedding network
         self.TIMESTEP_DIM = 512 # Keep at 512 (or update self.TIMESTEP_DIM in dalle2.DALLe2.generate so they match)
@@ -98,7 +99,8 @@ class Decoder(nn.Module):
             conditional_embedding_dim=self.COND_EMB_DIM,
             base_channels=self.BASE_CHANNELS,
             residual_blocks=self.RESIDUAL_BLOCKS,
-            device=self.device
+            device=self.device,
+            debug=self.debug
         )
 
         # Initialize DDIM Sampler (DDIMSampler.sample is a fully-deterministic process)
@@ -131,13 +133,33 @@ class Decoder(nn.Module):
         Returns:
             Predicted noise (epsilon), eps_theta, of shape (B, 3, H, W)
         """
+        B = x_t.size(0)
+
+        assert x_t.dim() == 4, f'[Decoder] x_t must be 4D (B, 3, H, W), got {x_t.shape}'
+        assert z_img.shape == (B, 512), f'[Decoder] z_img must have shape ({B}, 512), got {z_img.shape}'
+        assert t.shape == (B,), f'[Decoder] t must have shape ({B},), got {t.shape}'
+
+        if self.debug:
+            print(f'[Decoder] x_t shape: {x_t.shape} (expected: ({B}, 3, {self.IMG_SIZE}, {self.IMG_SIZE}))')
+            print(f'[Decoder] z_img shape: {z_img.shape} (expected: ({B}, 512))')
+            print(f'[Decoder] t shape before embedding: {t.shape} (expected: ({B},))')
+
         t_emb = self.timestep_embedder(t)
 
-        return self.decoder_unet.forward(
+        if self.debug:
+            print(f'[Decoder] t_emb shape: {t_emb.shape} (expected: ({B}, {self.TIMESTEP_DIM}))')
+
+        # Forward through U-Net
+        eps_pred = self.decoder_unet(
             x_t=x_t,
             z_img=z_img,
-            t_emb=t_emb,
+            t_emb=t_emb
         )
+
+        if self.debug:
+            print(f'[Decoder] eps_pred shape: {eps_pred.shape} (expected: ({B}, 3, {self.IMG_SIZE}, {self.IMG_SIZE}))')
+
+        return eps_pred
     
     def sample(
             self,
@@ -156,14 +178,28 @@ class Decoder(nn.Module):
         Returns:
             z_hat_img: the predicted CLIP image embeddings, of shape (B, 3, H, W)
         """
-        # Get the batch size, B
-        B = z_img.size(0) # Gets the first dimension
+        assert z_img.dim() == 2, f'[Decoder.sample] z_img must be 2D (B, 512), got shape {z_img.shape}'
+        B = z_img.size(0)
+        assert z_img.shape[1] == 512, f'[Decoder.sample] z_img must have dim 512, got {z_img.shape[1]}'
+
+        if self.debug:
+            print(f'[Decoder.sample] z_img shape: {z_img.shape} (expected: ({B}, 512))')
+            print(f'[Decoder.sample] Using {steps or self.sampler.num_inference_steps} inference steps')
 
         sampler = sampler or self.sampler
+
         # Call DDIMSampler.sample
-        return sampler.sample(
+        z_hat_img = sampler.sample(
             model=self,
             z_cond=z_img,
             shape=(B, 3, self.IMG_SIZE, self.IMG_SIZE),
             steps=steps
         )
+
+        if self.debug:
+            print(f'[Decoder.sample] z_hat_img shape: {z_hat_img.shape} (expected: ({B}, 3, {self.IMG_SIZE}, {self.IMG_SIZE}))')
+
+        return z_hat_img
+    
+    def predict_eps(self, x_t, z_cond, t):
+        return self.forward(x_t=x_t, z_img=z_cond, t=t)

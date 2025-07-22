@@ -40,15 +40,18 @@ class NoiseScheduler:
         Args:
             T: the number of timesteps
         """
+        # Initialize device (ideally using GPU)
+        self.device = 'cuda' if torch.cuda.is_available() else 'mps' if torch.mps.is_available() else 'cpu'
+
         # Compute beta_t
         BETA_START, BETA_END = 1e-4, .02
-        self.beta_t = torch.linspace(BETA_START, BETA_END, T)
+        self.beta_t = torch.linspace(BETA_START, BETA_END, T).to(self.device)
 
         # Compute alpha_t
-        self.alpha_t = 1.0 - self.beta_t
+        self.alpha_t = (1.0 - self.beta_t).to(self.device)
 
         # Compute alpha_bar_t
-        self.alpha_bar_t = torch.cumprod(self.alpha_t, dim=0)
+        self.alpha_bar_t = torch.cumprod(self.alpha_t, dim=0).to(self.device)
     
     def get_beta(
             self,
@@ -64,7 +67,7 @@ class NoiseScheduler:
         Returns:
             tensor of shape (B) with beta values.
         """
-        return self.beta_t[t]
+        return self.beta_t[t].to(t.device)[t]
     
     def get_alpha(
             self,
@@ -80,7 +83,7 @@ class NoiseScheduler:
         Returns:
             tensor of shape (B) with alpha values.
         """
-        return self.alpha_t[t]
+        return self.alpha_t[t].to(t.device)[t]
 
     def get_alpha_bar(
             self,
@@ -96,7 +99,7 @@ class NoiseScheduler:
         Returns:
             tensor of shape (B) with alpha-bar values.
         """
-        return self.alpha_bar_t[t]
+        return self.alpha_bar_t.to(t.device)[t]
     
     def add_noise(
             self,
@@ -116,7 +119,15 @@ class NoiseScheduler:
         """
         device = clean_input.device
         noise = torch.randn_like(clean_input)
-        alpha_bar = self.get_alpha_bar(t).to(device).view(-1, 1)  # (B, 1)
+        alpha_bar = self.get_alpha_bar(t).to(device).view(-1, 1) # (B, 1)
 
         z_t = torch.sqrt(alpha_bar) * clean_input + torch.sqrt(1 - alpha_bar) * noise
         return z_t, noise
+
+    def get_eps_pred_from_x0(self, x0_pred, x_t, t):
+        alpha_bar_t = self.get_alpha_bar(t)
+        while len(alpha_bar_t.shape) < len(x_t.shape):
+            alpha_bar_t = alpha_bar_t.unsqueeze(-1)
+        sqrt_alpha_bar = torch.sqrt(alpha_bar_t)
+        sqrt_one_minus_alpha_bar = torch.sqrt(1.0 - alpha_bar_t)
+        return (x_t - sqrt_alpha_bar * x0_pred) / sqrt_one_minus_alpha_bar

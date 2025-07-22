@@ -171,11 +171,23 @@ class BaseTrainer(ABC):
             # Save to local directory
             save_path = f'dalle2/checkpoints/{self.module_type}/epoch{epoch + 1}_batch{batch_i + 1}.pth'
             torch.save(self.train_module.state_dict(), save_path)
+    
+    def _save_final_model(self) -> None:
+        """
+        Saves the final trained model
+        """
+        if self.on_aws:
+            # Save to S3 bucket
+            raise NotImplementedError
+        else:
+            # Save to local directory
+            save_path = f'dalle2/checkpoints/{self.module_type}/final_trained_model.pth'
+            torch.save(self.train_module.state_dict(), save_path)
 
     def train(
             self,
             num_epochs: int,
-            save_every: int = 10,
+            save_every: int = 50,
             resume_checkpoint_name: str = None
     ) -> None:
         """
@@ -203,13 +215,19 @@ class BaseTrainer(ABC):
 
         # Training loop
         for epoch in range(num_epochs):
-            print(f'Epoch {epoch+1}/{num_epochs}')
+            print(f'Epoch {epoch + 1}/{num_epochs}')
             epoch_loss = 0.0
             
             # Wrap the dataloader with tqdm for a batch-level progress bar
             for batch_i, batch in enumerate(tqdm(self.dataloader, desc='Training', leave=True)): # leave=True keeps each progress bar after training
                 # Unpack the four components of the batch
-                z_T, z_txt, t, target_noise = batch
+                t, z_txt, z_T, target_noise = batch
+                if self.debug:
+                    print(f'[BaseTrainer] t: {t.shape}')
+                    print(f'[BaseTrainer] z_txt: {z_txt.shape}')
+                    print(f'[BaseTrainer] z_T: {z_T.shape}')
+                    print(f'[BaseTrainer] target_noise: {target_noise.shape}')
+
                 z_T = z_T.to(self.device)
                 z_txt = z_txt.to(self.device)
                 t = t.to(self.device)
@@ -238,9 +256,15 @@ class BaseTrainer(ABC):
                     self._save_current_model(epoch, batch_i)
 
             print(f'Average Epoch loss: {epoch_loss / len(self.dataloader):.4f}')
+        
+        # Save the final model to respective folder (either ../checkpoints/decoder or ../checkpoints/prior)
+        self._save_final_model()
 
         
 class PriorTrainer(BaseTrainer):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        
     @property
     def module_type(self) -> str:
         return 'prior'
@@ -261,8 +285,8 @@ class PriorTrainer(BaseTrainer):
         """
         # Extract the text embedding, the timestep embedding, and the fully-noised imaage (DDPM-defined)
         if self.debug:
-            print(f"Batch structure: {type(batch_input)}, len: {len(batch_input)}")
-            print(f"Batch content: {[type(b) for b in batch_input]}")
+            print(f'Batch structure: {type(batch_input)}, len: {len(batch_input)}')
+            print(f'Batch content: {[type(b) for b in batch_input]}')
 
         z_T, z_txt, t = batch_input
 
@@ -293,6 +317,9 @@ class PriorTrainer(BaseTrainer):
         return F.mse_loss(predicted, target)
 
 class DecoderTrainer(BaseTrainer):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
     @property
     def module_type(self) -> str:
         return 'decoder'
@@ -312,13 +339,13 @@ class DecoderTrainer(BaseTrainer):
             the predicted target
         """
         # Extract the partially-noisy images, the image embeddings, and the timestep embeddings from the batch input
-        x_t, z_img, t_emb = batch_input
+        x_t, z_img, t = batch_input
 
         # Forward pass
         return self.train_module.forward(
             x_t=x_t,
             z_img=z_img,
-            t_emb=t_emb,
+            t=t
         )
     
     def _compute_batch_loss(

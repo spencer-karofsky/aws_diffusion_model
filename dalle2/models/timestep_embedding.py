@@ -59,15 +59,36 @@ class TimestepEmbedder(nn.Module):
         Returns:
             the sinusoidally-encoded and projected timesteps Tensor, of shape (B, self.dim)
         """
-        # Get sinusoidal encoding
+        assert timesteps.dim() == 1, f'[TimestepEmbedder] Expected 1D timesteps, got shape: {timesteps.shape}'
+        self.debug = False
+
+        if self.debug:
+            print(f'[TimestepEmbedder] Input timesteps shape: {timesteps.shape}')
+
+        timesteps = timesteps.float() / 1000.0 # Normalize assuming T=1000
+        timesteps = torch.clamp(timesteps, min=1e-5, max=1.0)
+
         half_dim = self.dim // 2
-        emb = math.log(10000) / (half_dim - 1)
-        emb = torch.exp(torch.arange(half_dim, device=timesteps.device) * -emb)
-        timesteps = timesteps.view(-1)
-        emb = timesteps.float().unsqueeze(1) * emb.unsqueeze(0)
+        emb_scale = math.log(10000) / (half_dim - 1)
+        freqs = torch.exp(torch.arange(half_dim, device=timesteps.device) * -emb_scale)
 
+        if self.debug:
+            print(f'[TimestepEmbedder] freqs shape: {freqs.shape}')
 
-        # Concat Sine and Cosine components
-        emb = torch.cat([torch.sin(emb), torch.cos(emb)], dim=1)
+        # Broadcast and compute sinusoidal embedding
+        angles = timesteps.unsqueeze(1) * freqs.unsqueeze(0) # (B, half_dim)
 
-        return self.mlp(emb)
+        if self.debug:
+            print(f'[TimestepEmbedder] angles shape: {angles.shape}')
+
+        emb = torch.cat([torch.sin(angles), torch.cos(angles)], dim=1) # (B, dim)
+
+        if self.debug:
+            print(f'[TimestepEmbedder] sinusoidal emb shape: {emb.shape}')
+
+        projected = self.mlp(emb)
+
+        if self.debug:
+            print(f'[TimestepEmbedder] projected emb shape: {projected.shape}')
+
+        return projected

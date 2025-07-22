@@ -94,14 +94,16 @@ class DALLe2:
             if not os.path.exists(decoder_path):
                 raise FileNotFoundError(f'Decoder checkpoint not found at: {decoder_path}')
 
-            self.prior = Prior(device=self.device)
-            self.prior.load_state_dict(torch.load(prior_path, map_location=self.device))
+            self.prior = Prior(device=self.device, debug=debug)
+            self.prior.load_state_dict(torch.load(prior_path, map_location=self.device), strict=False)
+            self.prior.to(self.device)
             self.prior.eval()
             if debug:
                 print('Successfully loaded the prior and switched to mode "eval".')
 
-            self.decoder = Decoder(device=self.device)
-            self.decoder.load_state_dict(torch.load(decoder_path, map_location=self.device))
+            self.decoder = Decoder(device=self.device, debug=debug)
+            self.decoder.load_state_dict(torch.load(decoder_path, map_location=self.device), strict=False)
+            self.decoder.to(self.device)
             self.decoder.eval()
             if debug:
                 print('Successfully loaded the decoder and switched to mode "eval".')
@@ -143,23 +145,76 @@ class DALLe2:
         Returns:
             img_generations: the images conditioned on the text prompts (of shape (len(captions), 3, H, W), where H and W are the image height and width (px))
         """
-        # Encode text captions with CLIP, resulting in the text embeddings
-        if isinstance(captions, str):
-            captions = [captions]
+        # if isinstance(captions, str):
+        #     captions = [captions]
+
+        # # Step 1: Encode text prompts into multi-layer CLIP embeddings
+        # text_emb = self.clip_encoder.encode_text_multilayer(captions)  # shape: (B, 3, 512)
+        # assert text_emb.dim() == 3 and text_emb.shape[1:] == (3, 512), f'[Error] Expected z_txt shape (B, 3, 512), got {text_emb.shape}'
         
-        text_emb = self.clip_encoder.encode_text(captions)
+        # if self.debug:
+        #     print(f'[DALLe2.generate] z_txt shape before reduction: {text_emb.shape}')
 
-        # Generate the image embeddings (using the trained prior) given the text embeddings
-        image_embeddings_pred = self.prior.sample(
-            z_txt=text_emb,
-            sampler=self.prior_sampler,
-            steps=len(self.t)
-        )
+        # # Step 2: Reduce 3-layer CLIP embeddings to single (B, 512)
+        # # text_emb = text_emb.mean(dim=1)  # shape: (B, 512)
 
-        # Generate the clean images (using the decoder) given the image embeddings
-        generated_images = self.decoder.sample(z_emb_pred=image_embeddings_pred)
+        # if self.debug:
+        #     print(f'[DALLe2.generate] z_txt shape after reduction: {text_emb.shape}')
+
+        # # Step 3: Sample predicted image embeddings using the prior
+        # B = text_emb.size(0)
+
+        # image_embeddings_pred = self.prior.sample(
+        #     z_txt=text_emb,
+        #     sampler=self.prior_sampler,
+        #     steps=len(self.t)
+        # )
+        # # HERE! z_img = self.clip_encoder.encode_image(image.unsqueeze(0)).squeeze(0).to(device)
+
+
+        # assert image_embeddings_pred.dim() == 2 and image_embeddings_pred.shape[1] == 512, \
+        #     f'[Error] Prior output z_img must be shape (B, 512), got {image_embeddings_pred.shape}'
+
+        # if self.debug:
+        #     print(f'[DALLe2.generate] z_img (image embeddings) shape: {image_embeddings_pred.shape}')
+
+        # # Step 4: Decode image embeddings into full-resolution images
+        # generated_images = self.decoder.sample(z_img=image_embeddings_pred)
+        # assert generated_images.shape[1:] == (3, self.H, self.W), \
+        #     f'[Error] Generated image shape should be (B, 3, {self.H}, {self.W}), got {generated_images.shape}'
+
+        # if self.debug:
+        #     print(f'[DALLe2.generate] generated_images shape: {generated_images.shape}')
+
+        # return generated_images
+
+        from PIL import Image
+        from torchvision import transforms
+
+        # Preprocess image
+        transform = transforms.Compose([
+            transforms.Resize((self.H, self.W)),
+            transforms.ToTensor()
+        ])
+        image = Image.open('/Users/spencerkarofsky/Desktop/projects/aws_diffusion_model/dalle2/data/local_datasets/coco/val2017/000000000139.jpg').convert("RGB")
+        image_tensor = transform(image).unsqueeze(0).to(self.device)  # [1, 3, H, W]
+
+        # Extract ground truth z_img from CLIP
+        with torch.no_grad():
+            z_img = self.clip_encoder.encode_image(image_tensor).squeeze(0).to(self.device)  # [512]
 
         if self.debug:
-            raise NotImplementedError
+            print(f"[DALLe2.generate_from_image] True z_img shape: {z_img.shape}")
 
-        return generated_images
+        # Decode image embedding into RGB image
+        with torch.no_grad():
+            generated_image = self.decoder.sample(
+                z_img=z_img.unsqueeze(0),  # [1, 512]
+                sampler=self.decoder_sampler,
+                steps=len(self.t)
+            )  # [1, 3, H, W]
+
+        if self.debug:
+            print(f"[DALLe2.generate_from_image] Output shape: {generated_image.shape}")
+
+        return generated_image

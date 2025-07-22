@@ -4,5 +4,5 @@
 *.json
 *.zip
 *.png
-dataset_utils.py
+*.pth
 __pycache__/
