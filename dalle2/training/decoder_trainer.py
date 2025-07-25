@@ -1,59 +1,3 @@
-# """
-# decoder_trainer.py: trains the decoder model.
-# """
-# import torch
-# import torch.optim as optim
-
-# from dalle2.models.decoder import Decoder
-# from dalle2.sampling.noise_scheduler import NoiseScheduler
-# from dalle2.training.dalle2_training import DecoderTrainer
-
-# device = (
-#     'cuda' if torch.cuda.is_available()
-#     else 'mps' if torch.backends.mps.is_available()
-#     else 'cpu'
-# )
-
-# # Initialize model, optimizer, and noise scheduler
-# decoder_model = Decoder(device=device, debug=True)
-# optimizer = optim.AdamW(decoder_model.parameters(), lr=1e-4)
-# noise_scheduler = NoiseScheduler(T=1000)
-
-# # Dataset imports
-# from dalle2.data.dataset_utils import DecoderCOCODataset
-# import os
-
-# current_file = os.path.abspath(__file__)
-# metadata_path = os.path.join(
-#     os.path.dirname(__file__), '..', 'data', 'local_datasets', 'coco', 'metadata.csv'
-# )
-# images_dir = os.path.join(
-#     os.path.dirname(__file__), '..', 'data', 'local_datasets', 'coco', 'val2017'
-# )
-
-# metadata_path = os.path.normpath(metadata_path)
-# images_dir = os.path.normpath(images_dir)
-
-# # Initialize dataset
-# dataset = DecoderCOCODataset(
-#     metadata_path=metadata_path,
-#     images_dir=images_dir
-# )
-
-# # Initialize trainer
-# trainer = DecoderTrainer(
-#     train_module=decoder_model,
-#     optimizer=optimizer,
-#     noise_scheduler=noise_scheduler,
-#     dataset=dataset,
-#     batch_size=32,
-#     model_save_name='decoder_model',
-#     debug=False
-# )
-
-# if __name__ == "__main__":
-#     trainer.train(num_epochs=20, save_every=10)
-
 """
 decoder_trainer.py: trains the decoder model on a single image (for overfitting test).
 """
@@ -64,30 +8,45 @@ import os
 from dalle2.models.decoder import Decoder
 from dalle2.sampling.noise_scheduler import NoiseScheduler
 from dalle2.training.dalle2_training import DecoderTrainer
-from dalle2.data.dataset_utils import SingleImageDecoderDataset  # ✅ updated import
+from dalle2.data.dataset_utils_2 import COCODecoderDataset
 
+# === Device Setup ===
 device = (
     'cuda' if torch.cuda.is_available()
     else 'mps' if torch.backends.mps.is_available()
     else 'cpu'
 )
 
+# === Constants ===
+TARGET_IMG_SIZE = 128
+BATCH_SIZE = 16
+REPEATS = 256
+
 # === Model, optimizer, scheduler ===
 decoder_model = Decoder(device=device, debug=True)
 optimizer = optim.AdamW(decoder_model.parameters(), lr=1e-4)
-noise_scheduler = NoiseScheduler(T=1000)
-
-# === Use single image dataset ===
-image_path = os.path.join(
-    os.path.dirname(__file__), '..', 'data', 'local_datasets', 'coco', 'val2017', '000000000139.jpg'
+noise_scheduler = NoiseScheduler(
+    T=200,
+    schedule_type='cosine'
 )
-caption = "A dog wearing sunglasses."  # Use matching caption if possible
 
-dataset = SingleImageDecoderDataset(
-    image_path=image_path,
-    caption=caption,
-    resize_size=128,
-    device=device
+# === Paths ===
+current_file = os.path.abspath(__file__)
+metadata_path = os.path.normpath(os.path.join(
+    os.path.dirname(current_file), '..', 'data', 'local_datasets', 'coco', 'metadata.csv'
+))
+images_dir = os.path.normpath(os.path.join(
+    os.path.dirname(current_file), '..', 'data', 'local_datasets', 'coco', 'val2017'
+))
+
+# === Dataset ===
+dataset = COCODecoderDataset(
+    metadata_path=metadata_path,
+    images_dir=images_dir,
+    device=device,
+    resize_size=TARGET_IMG_SIZE,
+    noise_scheduler=noise_scheduler,
+    n_repeat=REPEATS
 )
 
 # === Trainer ===
@@ -96,10 +55,11 @@ trainer = DecoderTrainer(
     optimizer=optimizer,
     noise_scheduler=noise_scheduler,
     dataset=dataset,
-    batch_size=1,  # ✅ overfitting, small batch
+    batch_size=BATCH_SIZE,
     model_save_name='decoder_model_overfit',
-    debug=False
+    debug=False,
+    shuffle=True
 )
 
-if __name__ == "__main__":
-    trainer.train(num_epochs=20, save_every=10)
+if __name__ == '__main__':
+    trainer.train(num_epochs=1000, save_every=50)

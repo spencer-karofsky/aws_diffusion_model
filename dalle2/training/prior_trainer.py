@@ -1,64 +1,9 @@
-# """
-# prior_trainer.py: trains the prior model.
-# """
-# import torch
-# import torch.optim as optim
-
-# from dalle2.models.prior import Prior
-# from dalle2.sampling.noise_scheduler import NoiseScheduler
-# from dalle2.training.dalle2_training import PriorTrainer
-
-# TARGET_IMG_SIZE = 128 # pixels
-
-# device = (
-#     'cuda' if torch.cuda.is_available()
-#     else 'mps' if torch.backends.mps.is_available()
-#     else 'cpu'
-# )
-
-# prior_model = Prior(device=device)
-
-# optimizer = optim.AdamW(prior_model.parameters(), lr=1e-4)
-# noise_scheduler = NoiseScheduler(T=1000)
-
-
-# from dalle2.data.dataset_utils import PriorCOCODataset
-# import os
-
-# current_file = os.path.abspath(__file__)
-# metadata_path = os.path.join(
-#     os.path.dirname(__file__), '..', 'data', 'local_datasets', 'coco', 'metadata.csv'
-# )
-# images_dir = os.path.join(
-#     os.path.dirname(__file__), '..', 'data', 'local_datasets', 'coco', 'val2017'
-# )
-
-# metadata_path = os.path.normpath(metadata_path)
-# images_dir = os.path.normpath(images_dir)
-
-# dataset = PriorCOCODataset(
-#     metadata_path=metadata_path,
-#     images_dir=images_dir
-# )
-
-# trainer = PriorTrainer(
-#     train_module=prior_model,
-#     optimizer=optimizer,
-#     noise_scheduler=noise_scheduler,
-#     dataset=dataset,
-#     batch_size=32,
-#     model_save_name='prior_model',
-#     debug=True
-# )
-
-# if __name__ == "__main__":
-#     trainer.train(num_epochs=20, save_every=10)
-
 """
 prior_trainer.py: trains the prior model on a single image (for overfitting test).
 """
 import torch
 import torch.optim as optim
+
 import os
 
 from dalle2.models.prior import Prior
@@ -74,29 +19,37 @@ device = (
     else 'cpu'
 )
 
-# === Model, optimizer, scheduler ===
 prior_model = Prior(device=device)
 optimizer = optim.AdamW(prior_model.parameters(), lr=1e-4)
 noise_scheduler = NoiseScheduler(T=1000)
 
-# === Single image + caption ===
 image_path = os.path.join(
     os.path.dirname(__file__), '..', 'data', 'local_datasets', 'coco', 'val2017', '000000000139.jpg'
 )
 
-caption = "a yellow living room inside a house"
-BATCH_SIZE = 2
+BATCH_SIZE = 8
+
+REPEATS = 256
+
+current_file = os.path.abspath(__file__)
+metadata_path = os.path.normpath(os.path.join(
+    os.path.dirname(current_file), '..', 'data', 'local_datasets', 'coco', 'metadata.csv'
+))
+images_dir = os.path.normpath(os.path.join(
+    os.path.dirname(current_file), '..', 'data', 'local_datasets', 'coco', 'val2017'
+))
+
 
 dataset = COCOPriorDataset(
-    metadata_path='dalle2/data/local_datasets/coco/metadata.csv',
-    images_dir='dalle2/data/local_datasets/coco/val2017',
+    metadata_path=metadata_path,
+    images_dir=images_dir,
     batch_size=BATCH_SIZE,
     resize_size=TARGET_IMG_SIZE,
-    device=device
+    device=device,
+    noise_scheduler=noise_scheduler,
+    n_repeat=REPEATS
 )
 
-
-# === Trainer ===
 trainer = PriorTrainer(
     train_module=prior_model,
     optimizer=optimizer,
@@ -104,8 +57,9 @@ trainer = PriorTrainer(
     dataset=dataset,
     batch_size=BATCH_SIZE,
     model_save_name='prior_model_overfit',
-    debug=True
+    debug=False,
+    shuffle=False
 )
 
-if __name__ == "__main__":
-    trainer.train(num_epochs=20, save_every=10)
+if __name__ == '__main__':
+    trainer.train(num_epochs=200, save_every=200)

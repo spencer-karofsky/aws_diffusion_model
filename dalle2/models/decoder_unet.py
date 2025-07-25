@@ -235,7 +235,7 @@ class DecoderUNet(nn.Module):
             t_emb: the true timestep embeddings, of shape (B, 512)
         
         Returns:
-            the predicted batch of clean images, x-hat_0
+            the predicted noise sigma_hat added to x_0, of shape (B, C, H, W)
         """
         B, C, H, W = x_t.shape
 
@@ -254,12 +254,13 @@ class DecoderUNet(nn.Module):
             z_img=z_img
         )
         if self.debug:
-            print(f'[DecoderUNet] cond_emb shape: {cond_emb.shape} (expected: ({B}, 512))')
+           print(f'[DecoderUNet] cond_emb shape: {cond_emb.shape} (expected: ({B}, 512))')
 
         # Step 2. Project the noisy image, x_t
         x = self.input_proj(x_t)
         if self.debug:
             print(f'[DecoderUNet] After input_proj: {x.shape}')
+            print(f'[DecoderUNet] input_proj x range: ({x.min().item():.4f}, {x.max().item():.4f})')
 
         # Step 3. Perform downsampling on the noisy image projection
         skip_connections = []
@@ -272,18 +273,24 @@ class DecoderUNet(nn.Module):
             if self.debug:
                 print(f'[DecoderUNet] After DownsampleBlock {i}, shape: {x.shape}')
             x = down(x)
+            if self.debug:
+                print(f'[DecoderUNet] After downsample {i}, range: ({x.min().item():.4f}, {x.max().item():.4f})')
 
         # Step 4. Propagate downsampling output through the bottleneck, injecting the conditioning vectors into the residual blocks
         x = self.bottleneck_blocks[0](x, cond_emb) # ResidualBlock
         x = self.bottleneck_blocks[1](x) # SelfAttention2d
         x = self.bottleneck_blocks[2](x, cond_emb) # ResidualBlock
         if self.debug:
-            print(f'[DecoderUNet] After bottleneck: {x.shape}')
+            # print(f'[DecoderUNet] After bottleneck: {x.shape}')
+            print(f'[DecoderUNet] Bottleneck range: ({x.min().item():.4f}, {x.max().item():.4f})')
+
 
         # Step 5. Propagate bottleneck output through the upsampling layers
         for i, up in enumerate(self.upsample_layers):
             skip = skip_connections.pop()
             x = up(x, skip)
+            if self.debug:
+                print(f'[DecoderUNet] After upsample {i}, range: ({x.min().item():.4f}, {x.max().item():.4f})')
             for res_block in self.decoder_res_blocks[i]:
                 x = res_block(x, cond_emb)
                 if self.decoder_attn_blocks[i] is not None:
@@ -292,5 +299,9 @@ class DecoderUNet(nn.Module):
         # Step 6. Project the output of the upsampling layers
         out = self.output_proj(x)
         assert out.shape == (B, self.in_channels, H, W), f'[DecoderUNet] Output shape mismatch: expected ({B}, {self.in_channels}, {H}, {W}), got {out.shape}'
+
+        if self.debug:
+            print(f'[DecoderUNet] Output range: ({out.min().item():.4f}, {out.max().item():.4f})')
+            print(f'[DecoderUNet] Output mean: {out.mean().item():.4f}, std: {out.std().item():.4f}')
 
         return out

@@ -20,204 +20,199 @@ References:
 Author:
     * Spencer Karofsky (https://github.com/spencer-karofsky)
 """
-# PyTorch imports
+from typing import Tuple, Optional
+
 import torch
 import torch.nn as nn
 
-# Module imports
 from dalle2.sampling.noise_scheduler import NoiseScheduler
 
-# Other imports
-from typing import Tuple
+def _make_timesteps(total_steps: int, num_inference_steps: int, device: torch.device) -> torch.Tensor:
+    """
+    Return exactly num_inference_steps unique, strictly descending timesteps starting at total_steps-1 and ending at 0.
+    """
+    if num_inference_steps < 2:
+        raise ValueError('num_inference_steps must be >= 2 so that we include both (T-1) and 0')
 
-class DDIMSampler:
+    ts = torch.linspace(total_steps - 1, 0, num_inference_steps, device=device)
+    ts = torch.round(ts).long()
+
+    # Remove duplicates caused by rounding and force strict descending order
+    ts = torch.flip(torch.unique(torch.flip(ts, dims=[0])), dims=[0])
+
+    # Always make sure t=0 is present as the last element
+    if ts[-1] != 0:
+        ts = torch.cat([ts, ts.new_tensor([0])])
+
+    # If we now have more than requested due to the duplicate removal + t0 addition, drop the earliest redundant timesteps (those at the highest noise end).
+    if ts.numel() > num_inference_steps:
+        ts = ts[:num_inference_steps]
+
+    assert ts.numel() == num_inference_steps, "Timesteps calculation failed to produce the required length"
+    return ts
+
+
+def _extract_alpha_bar(
+        scheduler: NoiseScheduler,
+        t: torch.Tensor,
+        target_ndim: int
+) -> torch.Tensor:
+    """
+    Return alpha_bar_t with shape broadcastable to target_ndim
+    """
+    alpha_bar = scheduler.get_alpha_bar(t)
+    while alpha_bar.ndim < target_ndim:
+        alpha_bar = alpha_bar.unsqueeze(-1)
+    return alpha_bar
+
+class PriorDDIMSampler:
     def __init__(
-            self,
-            noise_scheduler: NoiseScheduler,
-            num_inference_steps: int,
-            eta: float = 0.0
-    ):
-        """
-        Initializes DDIM Sampler, which takes in pure noise and generates actual samples given a fixed number of steps.
-
-        Example Usage:
-            from noise_scheduler import NoiseScheduler
-            from ddim_sampling import DDIMSampler
-
-            scheduler = NoiseScheduler(1000)
-            sampler = DDIMSampler(noise_scheduler, 50, 0.1)
-
-            model = UNetModel(...)
-            model.load_state_dict(torch.load("path_to_model.pt"))
-            model.eval().cuda()
-
-            z_cond = clip_model.encode_text(["a cat wearing sunglasses"]).cuda() # [B, D]
-            samples = sampler.sample(model=model, z_cond=z_cond, shape=(1, 3, 64, 64))
-        
-        Args:
-            noise_scheduler: contains beta, alpha, and alpha-bar schedules
-            num_inference_steps: number of steps to use in DDIM sampling (e.g., 50)
-            eta: amount of noise to inject at each step (0.0 = deterministic DDIM, >0 = stochastic variant)
-        """
+        self,
+        noise_scheduler: NoiseScheduler,
+        num_inference_steps: int,
+        eta: float = 0.0,
+    ) -> None:
         self.scheduler = noise_scheduler
         self.num_inference_steps = num_inference_steps
-        self.eta = eta
+        self.eta = float(eta)
+        self.timesteps = _make_timesteps(len(noise_scheduler.alpha_bar_t), num_inference_steps, noise_scheduler.alpha_bar_t.device)
 
-        self.timesteps = self._get_ddim_timesteps()
-
-    def _get_ddim_timesteps(self) -> torch.Tensor:
-        """
-        Returns a tensor of T inference timesteps (evenly spaced over T total timesteps)
-        """
-        total_steps = len(self.scheduler.alpha_bar_t)
-        return torch.linspace(total_steps - 1, 0, self.num_inference_steps, dtype=torch.long)
-    
     def _predict_x0(
-                self,
-                x_t: torch.Tensor,
-                eps_pred: torch.Tensor,
-                t: torch.Tensor
-    ) -> torch.Tensor:
-        """
-        Predicts x_0 from the noisy sample x_t and the predicted noise eps_t.
-
-        Args:
-            x_t: current noisy sample, of shape (B, C, H, W)
-            eps_pred: predicted noise from model, of shape (B, C, H, W)
-            t: current timestep indices, of shape (B)
-
-        Returns:
-            reconstructed clean sample x_0, of shape (B, C, H, W)
-        """
-        alpha_bar_t = self.scheduler.get_alpha_bar(t)
-        while len(alpha_bar_t.shape) < len(x_t.shape):
-            alpha_bar_t = alpha_bar_t.unsqueeze(-1)
-        sqrt_alpha_bar = torch.sqrt(alpha_bar_t)
-        sqrt_one_minus_alpha_bar = torch.sqrt(1.0 - alpha_bar_t)
-        return (x_t - sqrt_one_minus_alpha_bar * eps_pred) / sqrt_alpha_bar
-    
-    def _ddim_step(
             self,
             x_t: torch.Tensor,
-            x0_pred: torch.Tensor,
-            eps_pred: torch.Tensor,
-            t_current: torch.Tensor,
-            t_next: torch.Tensor,
+            eps: torch.Tensor,
+            t: torch.Tensor
     ) -> torch.Tensor:
-        """
-        Computes x_{t-1} using the DDIM update rule.
+        alpha_bar = _extract_alpha_bar(self.scheduler, t, x_t.ndim)
+        return (x_t - torch.sqrt(1 - alpha_bar) * eps) / torch.sqrt(alpha_bar)
 
-        Args:
-            x_t: Current noisy sample, of shape (B, C, H, W)
-            x0_pred: Predicted clean sample, of shape (B, C, H, W)
-            eps_pred: Predicted noise, of shape (B, C, H, W)
-            t: Current timestep, of shape (B)
-            t_prev: previous timestep, of shape (B)
+    def _ddim_step(
+            self,
+            x0: torch.Tensor,
+            eps: torch.Tensor,
+            t_cur: torch.Tensor,
+            t_next: torch.Tensor
+    ) -> torch.Tensor:
+        alpha_bar_cur = _extract_alpha_bar(self.scheduler, t_cur, x0.ndim)
+        alpha_bar_next = _extract_alpha_bar(self.scheduler, t_next, x0.ndim)
 
-        Returns:
-            x_{t-1} sample, of shape (B, C, H, W)
-        """
-        # Check for NaNs
-        if torch.isnan(t_current).any():
-            raise Exception('[DDIMSampler._ddim_step] NaNs in t')
-        if torch.isnan(t_next).any():
-            raise Exception('[DDIMSampler._ddim_step] NaNs in t_prev')
-        
-        # Get alpha, alpha-bar values
-        alpha_bar_prev = self.scheduler.get_alpha_bar(t_current)
-        alpha_bar_t = self.scheduler.get_alpha_bar(t_next)
+        if self.eta == 0.0:
+            sigma = 0.0
+            noise = 0.0
+        else:
+            sigma = self.eta * torch.sqrt((1 - alpha_bar_next) / (1 - alpha_bar_cur) * (1 - alpha_bar_cur / alpha_bar_next))
+            noise = torch.randn_like(eps)
 
-        # Check for NaNs
-        if torch.isnan(alpha_bar_t).any():
-            raise Exception('[DDIMSampler._ddim_step] NaNs in alpha_bar_t. Check NoiseScheduler.get_alpha_bar')
-        if torch.isnan(alpha_bar_prev).any():
-            raise Exception('[DDIMSampler._ddim_step] NaNs in alpha_bar_prev. Check NoiseScheduler.get_alpha_bar')
-
-        while len(alpha_bar_t.shape) < len(x_t.shape):
-            alpha_bar_t = alpha_bar_t.unsqueeze(-1)
-            alpha_bar_prev = alpha_bar_prev.unsqueeze(-1)
-
-        # Compute sigma
-        sigma = self.eta * torch.sqrt(
-            (1 - alpha_bar_t) / (1 - alpha_bar_prev) * (1 - alpha_bar_prev / alpha_bar_t)
-        )
-        # Check for NaNs
-        if torch.isnan(sigma).any():
-            raise Exception('[DDIMSampler._ddim_step] NaNs in sigma. Check for division by 0, division by near-0, or sqrt of negative value(s)')
-        
-        noise = torch.randn_like(x_t) if self.eta > 0 else torch.zeros_like(x_t)
-        # Check for NaNs
-        if torch.isnan(noise).any():
-            raise Exception('[DDIMSampler._ddim_step] NaNs in noise')
-
-        x_prev = (
-            torch.sqrt(alpha_bar_prev) * x0_pred +
-            torch.sqrt(1 - alpha_bar_prev - sigma**2) * eps_pred +
+        return (
+            torch.sqrt(alpha_bar_next) * x0 +
+            torch.sqrt(1 - alpha_bar_next - sigma ** 2) * eps +
             sigma * noise
         )
-        # Check for NaNs
-        if torch.isnan(x_prev).any():
-            raise Exception('[DDIMSampler._ddim_step] NaNs in x_prev')
-        
-        return x_prev
     
     @torch.no_grad()
     def sample(
-            self,
-            model: nn.Module,
-            z_cond: torch.Tensor,
-            shape: Tuple[int, int, int, int],
-            steps: int = None
+        self,
+        model: nn.Module,
+        z_txt: torch.Tensor
     ) -> torch.Tensor:
         """
-        Performs DDIM sampling using the given model and conditioning.
+        Generate a CLIP image embedding from a CLIP text embedding using the learned prior.
+        """
+        B = z_txt.size(0)
+        device = z_txt.device
+        x_t = torch.randn(B, 512, device=device)
+
+        for i, t_i in enumerate(self.timesteps):
+            t = torch.full((B,), t_i, dtype=torch.long, device=device)
+            eps = model(z_txt=z_txt, t=t, z_T=x_t)  # ε_θ
+            x0 = self._predict_x0(x_t, eps, t)
+
+            if i == len(self.timesteps) - 1:
+                return x0 # already in embedding space, no range clamp necessary
+
+            t_next = torch.full((B,), self.timesteps[i + 1], dtype=torch.long, device=device)
+            x_t = self._ddim_step(x0, eps, t, t_next)
+
+class DecoderDDIMSampler:
+    def __init__(
+        self,
+        noise_scheduler: NoiseScheduler,
+        num_inference_steps: int,
+        eta: float = 0.0,
+        renorm_each_step: bool = False,
+    ) -> None:
+        self.scheduler = noise_scheduler
+        self.num_inference_steps = num_inference_steps
+        self.eta = float(eta)
+        self.renorm_each_step = renorm_each_step
+        self.timesteps = _make_timesteps(len(noise_scheduler.alpha_bar_t), num_inference_steps, noise_scheduler.alpha_bar_t.device)
+
+    def _predict_x0(
+            self,
+            x_t: torch.Tensor,
+            eps: torch.Tensor,
+            t: torch.Tensor
+    ) -> torch.Tensor:
+        alpha_bar = _extract_alpha_bar(self.scheduler, t, x_t.ndim)
+        return (x_t - torch.sqrt(1 - alpha_bar) * eps) / torch.sqrt(alpha_bar)
+
+    def _ddim_step(
+            self,
+            x0: torch.Tensor,
+            eps: torch.Tensor,
+            t_cur: torch.Tensor,
+            t_next: torch.Tensor
+        ) -> torch.Tensor:
+        alpha_bar_cur = _extract_alpha_bar(self.scheduler, t_cur, x0.ndim)
+        alpha_bar_next = _extract_alpha_bar(self.scheduler, t_next, x0.ndim)
+
+        if self.eta == 0.0:
+            sigma = 0.0
+            noise = 0.0
+        else:
+            sigma = self.eta * torch.sqrt((1 - alpha_bar_next) / (1 - alpha_bar_cur) * (1 - alpha_bar_cur / alpha_bar_next))
+            noise = torch.randn_like(eps)
+
+        x_prev = (
+            torch.sqrt(alpha_bar_next) * x0 +
+            torch.sqrt(1 - alpha_bar_next - sigma ** 2) * eps +
+            sigma * noise
+        )
+        return x_prev
+
+    @torch.no_grad()
+    def sample(
+        self,
+        model: nn.Module,
+        z_img: torch.Tensor,
+        image_size: Tuple[int, int] = (128, 128),
+    ) -> torch.Tensor:
+        """Generate a batch of denoised images given CLIP image embeddings.
 
         Args:
-            model: the trained denoising model
-            z_cond: conditioning vector, of shape (B, 512)
-            shape: Shape of output (B, C, H, W)
-            steps: number of inference steps
+            model: trained U-Net decoder
+            z_img: (B, 512) CLIP image embedding
+            image_size: (H,W) to generate
 
         Returns:
-            final denoised sample x_0, of shape (B, C, H, W)
+            Tensor of shape (B,3,H,W) in the range [-1,1]
         """
-        steps = steps or self.num_inference_steps
-        timesteps = torch.linspace(
-            len(self.scheduler.alpha_bar_t) - 1,
-            0,
-            steps,
-            dtype=torch.long,
-            device=z_cond.device
-        )
+        B, device = z_img.size(0), z_img.device
+        H, W = image_size
+        x_t = torch.randn(B, 3, H, W, device=device)
 
-        B = shape[0]
-        x_t = torch.randn(shape, device=z_cond.device)
+        for i, t_i in enumerate(self.timesteps):
+            t = torch.full((B,), t_i, dtype=torch.long, device=device)
 
-        for i, t_i in enumerate(timesteps):
-            t = torch.full((B,), t_i.item(), device=z_cond.device, dtype=torch.long)
+            eps = model(x_t=x_t, z_img=z_img, t=t)
+            
+            x0 = self._predict_x0(x_t, eps, t)
 
-            if hasattr(model, 'debug') and model.debug:
-                print(f'[DDIMSampler.sample] Step {i}/{steps} — t = {t_i.item()}')
+            if i == len(self.timesteps) - 1:
+                return x0.clamp(-1, 1)
 
-            if model.__class__.__name__ == 'Prior':
-                eps_pred = model(
-                    z_txt=z_cond,
-                    t=t,
-                    z_T=x_t
-                )
-            elif model.__class__.__name__ == 'Decoder':
-                eps_pred = model(
-                    x_t=x_t,
-                    z_img=z_cond,
-                    t=t,   
-                )
+            t_next = torch.full((B,), self.timesteps[i + 1], dtype=torch.long, device=device)
+            x_t = self._ddim_step(x0, eps, t, t_next)
 
-            x0_pred = self._predict_x0(x_t, eps_pred, t)
-
-            if i == steps - 1:
-                return x0_pred
-
-            t_next = torch.full((B,), timesteps[i + 1].item(), device=z_cond.device, dtype=torch.long)
-            x_t = self._ddim_step(x_t, x0_pred, eps_pred, t, t_next)
-
-        return x_t
+            if self.renorm_each_step:
+                x_t = x_t / x_t.std(dim=(1, 2, 3), keepdim=True).clamp(min=1e-4)

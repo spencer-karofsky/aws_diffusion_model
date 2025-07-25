@@ -27,12 +27,16 @@ from dalle2.models.decoder import Decoder
 
 from dalle2.utils.embeddings import get_timestep_embedding
 from dalle2.sampling.noise_scheduler import NoiseScheduler
+from dalle2.sampling.ddim_sampling import DecoderDDIMSampler
 
 # Other imports
 from abc import ABC, abstractmethod
 from typing import Union, Tuple
 import os
 from tqdm import tqdm
+import matplotlib.pyplot as plt
+from torchvision.utils import make_grid
+from PIL import Image
 
 class BaseTrainer(ABC):
     def __init__(
@@ -218,30 +222,58 @@ class BaseTrainer(ABC):
             print(f'Epoch {epoch + 1}/{num_epochs}')
             epoch_loss = 0.0
             
-            # Wrap the dataloader with tqdm for a batch-level progress bar
             for batch_i, batch in enumerate(tqdm(self.dataloader, desc='Training', leave=True)): # leave=True keeps each progress bar after training
-                # Unpack the four components of the batch
-                t, z_txt, z_T, target_noise = batch
-                if self.debug:
-                    print(f'[BaseTrainer] t: {t.shape}')
-                    print(f'[BaseTrainer] z_txt: {z_txt.shape}')
-                    print(f'[BaseTrainer] z_T: {z_T.shape}')
-                    print(f'[BaseTrainer] target_noise: {target_noise.shape}')
+                # Get batch data (different depending on the prior vs decoder) and pass to correct PyTorch device
+                if self.module_type == 'prior':
+                    # Inputs
+                    z_txt = batch['z_txt'].to(self.device)
+                    t = batch['t'].to(self.device)
+                    z_img_noisy = batch['z_img_noisy'].to(self.device)
 
-                z_T = z_T.to(self.device)
-                z_txt = z_txt.to(self.device)
-                t = t.to(self.device)
-                target_noise = target_noise.to(self.device)
+                    # Target (for computing loss)
+                    eps_img = batch['eps_img'].to(self.device)
 
-                # compute timestep embeddings inside the trainer
-                target_pred = self._run_batch(
-                    batch_input=(z_T, z_txt, t)
-                )
+                    if self.debug:
+                        print('[BaseTrainer] (Batch Data Passing into Prior:)')
+                        print(f'[BaseTrainer] z_txt: {z_txt.shape}')
+                        print(f'[BaseTrainer] t: {t.shape}')
+                        print(f'[BaseTrainer] z_img_noisy: {z_img_noisy.shape}')
+                        print(f'[BaseTrainer] eps_img (target noise): {eps_img.shape}')
+
+                    batch_input = (
+                        z_txt,
+                        t,
+                        z_img_noisy
+                    )
+
+                elif self.module_type == 'decoder':
+                    # Inputs
+                    x_t = batch['x_t'].to(self.device)
+                    z_img = batch['z_img'].to(self.device)
+                    t = batch['t'].to(self.device)
+
+                    # Target (for computing loss)
+                    eps_img = batch['eps_img'].to(self.device)
+
+                    if self.debug:
+                        print('[BaseTrainer] (Batch Data Passing into Decoder:)')
+                        print(f'[BaseTrainer] x_t: {x_t.shape}')
+                        print(f'[BaseTrainer] z_img: {z_img.shape}')
+                        print(f'[BaseTrainer] t: {t.shape}')
+                        print(f'[BaseTrainer] eps_img (target noise): {eps_img.shape}')
+                    
+                    batch_input = (
+                        x_t,
+                        z_img,
+                        t
+                    )
+
+                eps_hat = self._run_batch(batch_input=batch_input)
 
                 # Compute loss between predicted and true noise
                 loss = self._compute_batch_loss(
-                    target=target_noise,
-                    predicted=target_pred
+                    target=eps_img,
+                    predicted=eps_hat
                 )
 
                 epoch_loss += loss.item()
@@ -251,15 +283,66 @@ class BaseTrainer(ABC):
                 loss.backward()
                 self.optimizer.step()
 
-                # Periodically save the current model state in case of training interruptions
-                if (batch_i + 1) % save_every == 0:
-                    self._save_current_model(epoch, batch_i)
+            print(f'[Train] eps_img (target) — mean: {eps_img.mean():.4f}, std: {eps_img.std():.4f}')
+            print(f'[Train] eps_pred (output) — mean: {eps_hat.mean():.4f}, std: {eps_hat.std():.4f}')
+            print(f'[Train] MSE(eps_pred, eps_img): {F.mse_loss(eps_hat, eps_img).item():.6f}')
 
             print(f'Average Epoch loss: {epoch_loss / len(self.dataloader):.4f}')
-        
-        # Save the final model to respective folder (either ../checkpoints/decoder or ../checkpoints/prior)
+
+            if (epoch + 1) % save_every == 0:
+                self._save_current_model(epoch, 0)
+            
+            if (epoch + 1) % 10 == 0 and self.module_type == 'decoder':
+                self._run_intermediate_decoder_preview(epoch + 1, loss, steps=50)
+
         self._save_final_model()
 
+
+    def _run_intermediate_decoder_preview(self, epoch: int, loss: float, steps: int = 200):
+        """
+        Generate and save an image from the current decoder checkpoint using DDIM.
+
+        Args:
+            epoch: used for naming the file
+            steps: number of DDIM steps to use
+        """
+        print(f'[Epoch {epoch}] Running intermediate decoder inference preview...')
+
+        x0 = self.dataloader.dataset.image_tensor.unsqueeze(0).to(self.device) # (1, 3, H, W)
+        z_img = self.dataloader.dataset.z_img.to(self.device) # (1, 512)
+
+        sampler = DecoderDDIMSampler(self.noise_scheduler, num_inference_steps=steps)
+
+        self.train_module.eval()
+        with torch.no_grad():
+            generated_image = self.train_module.sample(
+                steps=steps,
+                z_img=z_img,
+                sampler=sampler
+            )
+
+        # Clamp and convert to [0, 1]
+        gen = generated_image.clamp(-1, 1)
+        vis = (gen + 1) / 2
+        vis_np = vis.squeeze(0).permute(1, 2, 0).cpu().numpy()
+
+        # Output range check
+        print(f"[Epoch {epoch}] Output range: ({vis_np.min():.4f}, {vis_np.max():.4f})")
+
+        # Create directory if needed
+        output_dir = 'dalle2/checkpoints/intermediate_outputs'
+        os.makedirs(output_dir, exist_ok=True)
+
+        # Save figure
+        plt.imshow(vis_np)
+        plt.axis("off")
+        plt.title(f"Decoder Output (Epoch {epoch}), MSE={loss:.6f}")
+        save_path = os.path.join(output_dir, f'epoch_{epoch}_output.png')
+        plt.savefig(save_path, bbox_inches='tight', pad_inches=0.1)
+        plt.close()
+        print(f'[Epoch {epoch}] Saved output to: {save_path}')
+
+        self.train_module.train()
         
 class PriorTrainer(BaseTrainer):
     def __init__(self, **kwargs):
@@ -278,7 +361,7 @@ class PriorTrainer(BaseTrainer):
         Defines how a batch is passed through the prior.
 
         Args:
-            batch_input: the input of the batch, (z_T (B, 512), z_txt (B, 512), t_emb (B, 512))
+            batch_input: the input of the batch, (z_T (B, 512), z_txt (B, 512), t (B, 512))
         
         Returns:
             the predicted target
@@ -288,7 +371,7 @@ class PriorTrainer(BaseTrainer):
             print(f'Batch structure: {type(batch_input)}, len: {len(batch_input)}')
             print(f'Batch content: {[type(b) for b in batch_input]}')
 
-        z_T, z_txt, t = batch_input
+        z_txt, t, z_T = batch_input
 
         # Forward pass
         return self.train_module.forward(
@@ -328,12 +411,12 @@ class DecoderTrainer(BaseTrainer):
             self,
             batch_input: Tuple[torch.Tensor, torch.Tensor, torch.Tensor]
 
-    ) -> torch.Tensor:
+    ) -> Tuple[torch.Tensor, dict]:
         """
         Defines how a batch is passed through the decoder.
 
         Args:
-            batch_input: the input of the batch, (z_t (B, 512), z_img (B, 512), t_emb (B, 512))
+            batch_input: the input of the batch, (z_t (B, 512), z_img (B, 512), t (B, 512))
         
         Returns:
             the predicted target
@@ -366,8 +449,3 @@ class DecoderTrainer(BaseTrainer):
         """
         # The decoder's loss is the MSE between the predicted noise and true noise added to the final generated images
         return F.mse_loss(predicted, target)
-
-
-    
-
-        

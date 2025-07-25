@@ -165,7 +165,9 @@ class ResidualBlock(nn.Module):
         self.act2 = nn.SiLU()
         self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1)
 
-        self.cond_proj = nn.Linear(cond_dim, out_channels)
+        # self.cond_proj = nn.Linear(cond_dim, out_channels)
+        
+        self.film = nn.Linear(cond_dim, out_channels * 2)
 
         self.skip = (
             nn.Conv2d(in_channels, out_channels, kernel_size=1)
@@ -222,20 +224,17 @@ class ResidualBlock(nn.Module):
             print(f'[ResidualBlock] output x expected size: {x_size}\n')
 
         # Inject conditioning (broadcasted)
-        cond = self.cond_proj(cond_emb) # (B, out_channels)
-        if self.debug:
-            print(f'[ResidualBlock] conditional projection actual output size: {cond.size()}')
-            print(f'[ResidualBlock] conditional projection expected output size: ({x_B}, {self.out_channels})\n')
+        # FiLM conditioning
+        scale_shift = self.film(cond_emb) # (B, 2 * out_channels)
+        scale, shift = scale_shift.chunk(2, dim=1) # (B, out_channels), (B, out_channels)
 
-        # Dynamically squeeze extra dims that would otherwise cause a shape mismatch error
-        extra_dims = cond.dim() - 2
-        for _ in range(extra_dims):
-            cond = cond.squeeze(1)
-        
-        while cond.dim() < x.dim():
-            cond = cond.unsqueeze(-1)
+        # Broadcast to (B, C, H, W)
+        scale = scale.unsqueeze(-1).unsqueeze(-1)
+        shift = shift.unsqueeze(-1).unsqueeze(-1)
 
-        x = x + cond
+        # Apply FiLM
+        x = x * (1 + scale) + shift
+
         if self.debug:
             print(f'[ResidualBlock] x actual output size: {x.size()}')
             print(f'[ResidualBlock] x expected output size: ({x_B, self.out_channels}, {x_H}, {x_W})\n')

@@ -151,15 +151,15 @@ class CLIPEncoder(nn.Module):
         Returns:
             Tensor of shape [B, 3, 512]
         """
-        raise Exception('Check clip_encoding.py and likely use other method!')
+        # raise Exception('Check clip_encoding.py and likely use other method!')
         token_embeddings = self.encode_text_tokens(texts)  # [B, 77, 512]
         assert token_embeddings.dim() == 3 and token_embeddings.shape[1:] == (77, 512)
 
-        start = token_embeddings[:, 0]         # [B, 512]
-        mean = token_embeddings.mean(dim=1)    # [B, 512]
-        end = token_embeddings[:, -1]          # [B, 512]
+        start = token_embeddings[:, 0] # (B, 512)
+        mean = token_embeddings.mean(dim=1) # (B, 512)
+        end = token_embeddings[:, -1] # (B, 512)
 
-        combined = torch.stack([start, mean, end], dim=1)  # [B, 3, 512]
+        combined = torch.stack([start, mean, end], dim=1) # (B, 3, 512)
         return combined
     
     def encode_text_ensemble(
@@ -180,13 +180,13 @@ class CLIPEncoder(nn.Module):
         tokens = self.tokenizer(texts).to(self.device)
         embeddings = []
 
-        self.model.train()  # Enables dropout for stochastic encoding
+        self.model.train() # Enables dropout for stochastic encoding
         for _ in range(n):
             with torch.no_grad():
-                features = self.model.encode_text(tokens)  # [B, 512]
+                features = self.model.encode_text(tokens) # (B, 512)
                 features /= features.norm(dim=-1, keepdim=True)
             embeddings.append(features)
 
-        self.model.eval()  # Reset back to eval mode
-        return torch.stack(embeddings, dim=1)  # [B, n, 512]
+        self.model.eval() # Reset back to eval mode
+        return torch.stack(embeddings, dim=1) # (B, n, 512)
 

@@ -44,7 +44,8 @@ from dalle2.models.prior_transformer import PriorTransformer
 from dalle2.models.timestep_embedding import TimestepEmbedder
 
 from dalle2.sampling.noise_scheduler import NoiseScheduler
-from dalle2.sampling.ddim_sampling import DDIMSampler
+# from dalle2.sampling.ddim_sampling import DDIMSampler
+from dalle2.sampling.ddim_sampling import PriorDDIMSampler
 
 class Prior(nn.Module):
     def __init__(
@@ -95,7 +96,7 @@ class Prior(nn.Module):
 
         # Initialize DDIM Sampler (DDIMSampler.sample is a fully-deterministic process)
         noise_scheduler = NoiseScheduler(T=T)
-        self.sampler = DDIMSampler(
+        self.sampler = PriorDDIMSampler(
             noise_scheduler=noise_scheduler,
             num_inference_steps=num_inference_steps,
             eta=0.0  # Fully-deterministic DDIM
@@ -184,56 +185,100 @@ class Prior(nn.Module):
             device=self.device
         )
 
+    # @torch.no_grad()
+    # def sample(
+    #         self,
+    #         z_txt: torch.Tensor,
+    #         sampler: DDIMSampler = None,
+    #         steps: int = None,
+    # ) -> torch.Tensor:
+    #     """
+    #     Defines the full forward pass of the prior (used during inference only)
+
+    #     Args:
+    #         z_txt: the CLIP text embeddings, of shape (B, 3, 512) (B=batch size)
+    #         sampler: the DDIM sampleer
+    #         steps: number of inference steps
+        
+    #     Returns:
+    #         z_hat_img: the predicted clean CLIP image embeddings, of shape (B, 512)
+    #     """
+    #     B = z_txt.size(0)
+
+    #     # Normalize input shape to (B, 3, 512)
+    #     if z_txt.dim() != 2 or z_txt.size(0) != B or z_txt.size(1) != 512:
+    #         if z_txt.dim() == 2 and z_txt.size(1) == 3 * 512:
+    #             z_txt = z_txt.view(B, 3, 512)
+    #         elif z_txt.dim() == 3 and z_txt.size(1) == 1:
+    #             z_txt = z_txt.expand(B, 3, 512)
+    #         elif z_txt.dim() == 4 and z_txt.size(1) == 1:
+    #             z_txt = z_txt.view(B, z_txt.shape[2], z_txt.shape[3])
+    #         elif z_txt.dim() == 2:
+    #             z_txt = z_txt.view(B, 3, 512)
+            
+    #         assert z_txt.shape == (B, 3, 512), f'[Prior.sample] z_txt must be shape (B, 3, 512), got {z_txt.shape}'
+    #     else:
+    #         raise Exception(f'[Prior.sample]z_txt must be (B, 3, 512), got {z_txt.shape}')
+
+    #     if self.debug:
+    #         print(f'[Prior.sample] z_txt final shape: {z_txt.shape}')
+    #         print(f'[Prior.sample] steps: {steps}')
+
+    #     # Default to self.sampler if not provided
+    #     sampler = sampler or self.sampler
+
+    #     # Call DDIM sampler to predict clean image embeddings (of shape (B, 512))
+    #     x_hat_img = sampler.sample(
+    #         model=self,
+    #         z_cond=z_txt,
+    #         shape=(B, 512),
+    #         steps=steps
+    #     )
+
+    #     return x_hat_img
+    
+    # def predict_eps(self, x_t, z_cond, t):
+    #     return self.forward(z_txt=z_cond, t=t, z_T=x_t)
+
     @torch.no_grad()
     def sample(
-            self,
-            z_txt: torch.Tensor,
-            sampler: DDIMSampler = None,
-            steps: int = None,
+        self,
+        z_txt: torch.Tensor,
+        steps: int = None,
+        sampler: PriorDDIMSampler = None
     ) -> torch.Tensor:
         """
-        Defines the full forward pass of the prior (used during inference only)
+        Runs DDIM sampling to generate a clean CLIP image embedding conditioned on the text.
 
         Args:
-            z_txt: the CLIP text embeddings, of shape (B, 3, 512) (B=batch size)
-            sampler: the DDIM sampleer
-            steps: number of inference steps
-        
-        Returns:
-            z_hat_img: the predicted CLIP image embeddings, of shape (B, 512)
-        """
-        B = z_txt.size(0)
+            z_txt: CLIP text embedding, shape (B, 512) or (B, 3, 512)
+            steps: optional number of inference steps
+            sampler: optional custom sampler (e.g., PriorDDIMSampler with different eta)
 
-        # Normalize input shape to (B, 3, 512)
-        if z_txt.dim() != 2 or z_txt.size(0) != B or z_txt.size(1) != 512:
-            if z_txt.dim() == 2 and z_txt.size(1) == 3 * 512:
-                z_txt = z_txt.view(B, 3, 512)
-            elif z_txt.dim() == 3 and z_txt.size(1) == 1:
-                z_txt = z_txt.expand(B, 3, 512)
-            elif z_txt.dim() == 4 and z_txt.size(1) == 1:
-                z_txt = z_txt.view(B, z_txt.shape[2], z_txt.shape[3])
-            elif z_txt.dim() == 2:
-                z_txt = z_txt.view(B, 3, 512)
-            
-            assert z_txt.shape == (B, 3, 512), f'[Prior.sample] z_txt must be shape (B, 3, 512), got {z_txt.shape}'
-        else:
-            raise Exception(f'[Prior.sample]z_txt must be (B, 3, 512), got {z_txt.shape}')
+        Returns:
+            z_hat_img: predicted clean CLIP image embeddings, shape (B, 512)
+        """
+        self.debug = True
+
+        B = z_txt.shape[0]
+
+        # Handle various z_txt input shapes
+        if z_txt.dim() == 2:
+            z_txt = z_txt.unsqueeze(1).expand(-1, 3, 512)  # (B, 512) → (B, 3, 512)
+        elif z_txt.dim() == 3 and z_txt.shape[1] == 1:
+            z_txt = z_txt.expand(-1, 3, 512)
+        elif z_txt.dim() == 4 and z_txt.shape[1] == 1:
+            z_txt = z_txt.view(B, 3, 512)
+
+        assert z_txt.shape == (B, 3, 512), f"[Prior.sample] z_txt must be shape (B, 3, 512), got {z_txt.shape}"
 
         if self.debug:
-            print(f'[Prior.sample] z_txt final shape: {z_txt.shape}')
-            print(f'[Prior.sample] steps: {steps}')
+            print(f"[Prior.sample] z_txt shape: {z_txt.shape}")
+            print(f"[Prior.sample] steps: {steps}")
 
-        # Default to self.sampler if not provided
-        sampler = sampler or self.sampler
+        # Use default sampler if none provided
+        #sampler = sampler or self.sampler
 
-        # Call DDIM sampler
-        return sampler.sample(
-            model=self,
-            z_cond=z_txt,
-            shape=(B, 512),
-            steps=steps
-        )
-    
-    def predict_eps(self, x_t, z_cond, t):
-        return self.forward(z_txt=z_cond, t=t, z_T=x_t)
+        return sampler.sample(model=self, z_txt=z_txt, steps=steps)
+
 

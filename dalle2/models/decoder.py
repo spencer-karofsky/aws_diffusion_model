@@ -2,20 +2,20 @@
 decoder.py: Implements the decoder used by DALL·E 2.
 
 Description:
-    * The decoder learns to reconstruct an image from random noise (conditioned on a CLIP image embedding and timestep embedding).
+    * The decoder learns to predict the noise, epsilon, added to an image at timestep t (conditioned on CLIP image embedding and timestep embedding).
     * Training:
         - During training, we train a U-Net that takes in three inputs:
             1. Noisy images at a timestep, t, according to the DDPM's forward noising process.
             2. Clean CLIP image embeddings, z_img.
             3. MLP-Projected and Sinusoidally-encoded timestep embeddings, t_emb.
-        - The U-Net learns to predict the batch of clean images, x-hat_0.
-        - Loss: Computed as the MSE between x-hat_0 and the true images, x_0.
+        - The U-Net learns to predict the noise
+        - Loss: Computed as the MSE between expected and predicted noise.
     * Inference:
         - Trained U-Net inputs:
             1. Pure Gaussian Noise, x_T.
             2. Predicted Clean CLIP image embedding, z-hat_img (output of the prior).
             3. MLP-Projected and Sinusoidally-encoded timestep embeddings, t_emb.
-        - Output of the U-Net: the predicted/generated clean image, x-hat_0, conditioned on the original text captions.
+        - Output of the U-Net: the predicted noise, conditioned on the original text captions.
 
 Classes:
     * Decoder(nn.Module): A modular DALL·E 2 decoder.
@@ -42,7 +42,7 @@ from dalle2.models.decoder_unet import DecoderUNet
 from dalle2.models.timestep_embedding import TimestepEmbedder
 
 from dalle2.sampling.noise_scheduler import NoiseScheduler
-from dalle2.sampling.ddim_sampling import DDIMSampler
+from dalle2.sampling.ddim_sampling import DecoderDDIMSampler
 
 class Decoder(nn.Module):
     def __init__(
@@ -85,7 +85,7 @@ class Decoder(nn.Module):
         # Define U-Net hyperparameters and instantiate the U-Net
         self.IMG_SIZE = 128 # pixels
         self.IN_CHANNELS = 3 # 3 color channels (RGB)
-        self.COND_EMB_DIM = 512 # embedding dimensionality of the conditioning vector you inject into the U-Net
+        self.COND_EMB_DIM = 512 # embedding dimensionality of the conditioning vector to inject into the U-Net
         self.BASE_CHANNELS = 64 # base channels in the first convolution layer
         self.CHANNEL_MULTS = (1, 2, 4, 8,) # base channel multiplier at each level
         self.RESIDUAL_BLOCKS = 2 # number of residual blocks at each level (use 2 for now)
@@ -100,16 +100,11 @@ class Decoder(nn.Module):
             base_channels=self.BASE_CHANNELS,
             residual_blocks=self.RESIDUAL_BLOCKS,
             device=self.device,
-            debug=self.debug
+            #debug=self.debug
+            debug=False
         )
 
-        # Initialize DDIM Sampler (DDIMSampler.sample is a fully-deterministic process)
-        noise_scheduler = NoiseScheduler(T=T)
-        self.sampler = DDIMSampler(
-                noise_scheduler=noise_scheduler,
-                num_inference_steps=num_inference_steps,
-                eta=0.0 # Fully-deterministic
-        )
+        self.sampler = None
 
         # AWS configuration, if training on AWS
         if on_aws:
@@ -143,11 +138,17 @@ class Decoder(nn.Module):
             print(f'[Decoder] x_t shape: {x_t.shape} (expected: ({B}, 3, {self.IMG_SIZE}, {self.IMG_SIZE}))')
             print(f'[Decoder] z_img shape: {z_img.shape} (expected: ({B}, 512))')
             print(f'[Decoder] t shape before embedding: {t.shape} (expected: ({B},))')
+            print(f'[Decoder] CLIP z_img norm: {z_img.norm(dim=-1)}, expected: ~1.0')
+            print(f'[Decoder] CLIP z_img stats — mean: {z_img.mean():.4f}, std: {z_img.std():.4f}, min: {z_img.min():.4f}, max: {z_img.max():.4f}')
+            print(f'[Decoder] x_t mean: {x_t.mean():.4f}, std: {x_t.std():.4f}')
+            print(f'[Decoder] x_t range: ({x_t.min():.4f}, {x_t.max():.4f})')
+
 
         t_emb = self.timestep_embedder(t)
 
         if self.debug:
-            print(f'[Decoder] t_emb shape: {t_emb.shape} (expected: ({B}, {self.TIMESTEP_DIM}))')
+            print(f'[Decoder] t_emb: shape: {t_emb.shape}, mean: {t_emb.mean():.4f}, std: {t_emb.std():.4f}, min: {t_emb.min():.4f}, max: {t_emb.max():.4f}')
+
 
         # Forward through U-Net
         eps_pred = self.decoder_unet(
@@ -157,30 +158,31 @@ class Decoder(nn.Module):
         )
 
         if self.debug:
-            print(f'[Decoder] eps_pred shape: {eps_pred.shape} (expected: ({B}, 3, {self.IMG_SIZE}, {self.IMG_SIZE}))')
+            print(f'[Decoder] eps_pred: shape: {eps_pred.shape}, mean: {eps_pred.mean():.4f}, std: {eps_pred.std():.4f}, min: {eps_pred.min():.4f}, max: {eps_pred.max():.4f}')
+
 
         return eps_pred
-    
+
+    @torch.no_grad()
     def sample(
-            self,
-            z_img: torch.Tensor,
-            sampler: DDIMSampler = None,
-            steps: int = None
+        self,
+        z_img: torch.Tensor,
+        steps: int = None,
+        sampler: DecoderDDIMSampler = None
     ) -> torch.Tensor:
         """
-        Defines the full forward pass of the decoder (used during inference only)
+        Uses DDIM sampling to generate a clean image (x0) from predicted CLIP image embedding.
 
         Args:
-            z_img: the CLIP image embeddings, of shape (B, 512) (B=batch size)
-            sampler: the DDIM sampler
-            steps: number of inference steps
-        
+            z_img: predicted clean CLIP image embedding from the Prior, shape (B, 512)
+            steps: number of inference steps (optional override)
+            sampler: optional DDIMSampler instance
+
         Returns:
-            z_hat_img: the predicted CLIP image embeddings, of shape (B, 3, H, W)
+            x0_pred: generated clean image, shape (B, 3, H, W)
         """
-        assert z_img.dim() == 2, f'[Decoder.sample] z_img must be 2D (B, 512), got shape {z_img.shape}'
+        assert z_img.dim() == 2 and z_img.size(1) == 512, f'[Decoder.sample] z_img must be (B, 512), got {z_img.shape}'
         B = z_img.size(0)
-        assert z_img.shape[1] == 512, f'[Decoder.sample] z_img must have dim 512, got {z_img.shape[1]}'
 
         if self.debug:
             print(f'[Decoder.sample] z_img shape: {z_img.shape} (expected: ({B}, 512))')
@@ -188,18 +190,8 @@ class Decoder(nn.Module):
 
         sampler = sampler or self.sampler
 
-        # Call DDIMSampler.sample
-        z_hat_img = sampler.sample(
+        return sampler.sample(
             model=self,
-            z_cond=z_img,
-            shape=(B, 3, self.IMG_SIZE, self.IMG_SIZE),
-            steps=steps
+            z_img=z_img,
+            image_size=(self.IMG_SIZE, self.IMG_SIZE)
         )
-
-        if self.debug:
-            print(f'[Decoder.sample] z_hat_img shape: {z_hat_img.shape} (expected: ({B}, 3, {self.IMG_SIZE}, {self.IMG_SIZE}))')
-
-        return z_hat_img
-    
-    def predict_eps(self, x_t, z_cond, t):
-        return self.forward(x_t=x_t, z_img=z_cond, t=t)
