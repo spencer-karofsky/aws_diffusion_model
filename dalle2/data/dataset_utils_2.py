@@ -65,22 +65,28 @@ class COCOPriorDataset(Dataset):
         device: torch.device,
         noise_scheduler: NoiseScheduler,
         resize_size: int = 128,
-        n_repeat: int = 64  # number of times to repeat the single sample
+        n_repeat: int = 64,  # number of samples
+        seed: int = 42       # for reproducibility
     ):
         super().__init__()
         self.B = batch_size
         self.device = device
-        self.n_repeat = n_repeat
         self.noise_scheduler = noise_scheduler
+        self.T = noise_scheduler.alpha_bar_t.shape[0]
+        self.n_repeat = n_repeat
 
-        if not os.path.isfile(metadata_path):
-            raise FileNotFoundError(f'metadata.csv not found at {metadata_path}')
-        if not os.path.isdir(images_dir):
-            raise FileNotFoundError(f'Image directory not found at {images_dir}')
+        # Deterministic sampling
+        g = torch.Generator(device=device).manual_seed(seed)
+        self.timesteps = torch.randint(0, self.T, (n_repeat,), generator=g, device=device)
 
+        # Load and encode image
         self.df = pd.read_csv(metadata_path)
         self.images_dir = images_dir
-        self.resize_size = resize_size
+        row = self.df.iloc[0]
+        self.caption = row['caption']
+
+        img_path = os.path.join(self.images_dir, os.path.basename(row['image_path']))
+        image = Image.open(img_path).convert("RGB")
 
         self.transform = transforms.Compose([
             transforms.Resize((resize_size, resize_size), antialias=True),
@@ -89,42 +95,32 @@ class COCOPriorDataset(Dataset):
         ])
 
         self.clip_encoder = CLIPEncoder().to(device)
-        # self.noise_scheduler = NoiseScheduler()
-        self.noise_scheduler.alpha_bar_t = self.noise_scheduler.alpha_bar_t.to(device)
-        self.T = self.noise_scheduler.alpha_bar_t.shape[0]
-
-        # Preprocess the single sample once
-        row = self.df.iloc[0]
-        self.caption = row['caption']
-        print(self.caption)
-        img_path = row['image_path']
-
-        if not os.path.isabs(img_path):
-            img_path = os.path.join(self.images_dir, os.path.basename(img_path))
-        if not os.path.isfile(img_path):
-            raise FileNotFoundError(f'Image not found at {img_path}')
-
-        image = Image.open(img_path).convert('RGB')
-        image_tensor = self.transform(image).unsqueeze(0).to(self.device)
+        image_tensor = self.transform(image).unsqueeze(0).to(device)
 
         with torch.no_grad():
-            self.z_txt = self.clip_encoder.encode_text([self.caption]).to(self.device)  # (1, 512)
-            self.z_img = self.clip_encoder.encode_image(image_tensor).to(self.device)  # (1, 512)
+            self.z_img = self.clip_encoder.encode_image(image_tensor).squeeze(0).to(device)  # (512,)
+            self.z_txt = self.clip_encoder.encode_text([self.caption]).squeeze(0).to(device)  # (512,)
+
+        # Pre-sample all noise vectors
+        self.noises = torch.randn(n_repeat, self.z_img.shape[0], generator=g, device=device)
 
     def __len__(self):
         return self.n_repeat
 
     def __getitem__(self, idx):
-        # Sample a different timestep t for each repeat
-        t = torch.randint(0, self.T, (1,), device=self.device).long()
-        z_img_noisy, eps_img = self.noise_scheduler.add_noise(self.z_img, t)
+        t = torch.randint(0, self.T, (1,), device=self.device)
+        eps = torch.randn(1, self.z_img.shape[0], device=self.device)
+        z_img = self.z_img.unsqueeze(0)
+        z_img_noisy = self.noise_scheduler.q_sample(z_img, t, eps)
 
         return {
-            'z_txt': self.z_txt.squeeze(0),
-            't': t.squeeze(0),
-            'z_img_noisy': z_img_noisy.squeeze(0),
-            'eps_img': eps_img.squeeze(0)
+            'z_txt': self.z_txt,                    # (512,)
+            't': t.squeeze(0),                      # ()
+            'z_img_noisy': z_img_noisy.squeeze(0),  # (512,)
+            'eps_img': eps.squeeze(0),              # (512,)
+            'z_img': self.z_img                     # (512,)
         }
+
 
 class COCODecoderDataset(Dataset):
     def __init__(
@@ -134,7 +130,7 @@ class COCODecoderDataset(Dataset):
         device: torch.device,
         noise_scheduler: NoiseScheduler,
         resize_size: int = 64,
-        n_repeat: int = 64  # number of times to repeat the single image
+        n_repeat: int = 64 # number of times to repeat the single image
     ):
         super().__init__()
         self.device = device
@@ -157,25 +153,19 @@ class COCODecoderDataset(Dataset):
         ])
 
         self.clip_encoder = CLIPEncoder().to(device)
-        # self.noise_scheduler = NoiseScheduler()
         self.noise_scheduler.alpha_bar_t = self.noise_scheduler.alpha_bar_t.to(device)
         self.T = self.noise_scheduler.alpha_bar_t.shape[0]
 
         # Only use the first image
         self.image_tensor = self._load_image_tensor(self.df.iloc[0]['image_path'])
 
-        # print(f'[COCODecoderDataset] image range: ({self.image_tensor.min().item()}, {self.image_tensor.max().item()}), expected: (-1.0, 1.0)')
-
         with torch.no_grad():
             self.z_img = self.clip_encoder.encode_image(self.image_tensor).to(self.device)
             self.z_img = self.z_img / self.z_img.norm(dim=-1, keepdim=True)
-            print(f'[COCODecoderDataset] z_img norm: {self.z_img.norm(dim=-1)} (expected ≈ 1.0)')
-
 
     def _load_image_tensor(self, img_path):
         if not os.path.isabs(img_path):
             img_path = os.path.join(self.images_dir, os.path.basename(img_path))
-            print(img_path)
         if not os.path.isfile(img_path):
             raise FileNotFoundError(f'Image not found at {img_path}')
         image = Image.open(img_path).convert('RGB')
@@ -189,8 +179,6 @@ class COCODecoderDataset(Dataset):
         t = torch.randint(0, self.T, (batch_size,), device=self.device).long()
 
         x_t, eps_img = self.noise_scheduler.add_noise(self.image_tensor, t)
-        
-        # print(f'[COCODecoderDataset.__getitem__] x_t range: ({x_t.min().item()}, {x_t.max().item()})')
 
         with torch.no_grad():
             a_bar = self.noise_scheduler.get_alpha_bar(t).view(-1,1,1,1)

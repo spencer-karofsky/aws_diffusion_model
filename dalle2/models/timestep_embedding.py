@@ -20,7 +20,9 @@ import math
 class TimestepEmbedder(nn.Module):
     def __init__(
             self,
-            dim: int
+            dim: int,
+            module: str,
+            T: int = 200
     ):
         """
         Encodes the timestep into a learned embedding.
@@ -33,16 +35,31 @@ class TimestepEmbedder(nn.Module):
 
         Args:
             dim: embedding dimension (512)
+            module: the prior needs a layer norm, while it breaks the decoder's output
+            T: number of timesteps
         """
         super().__init__()
         self.dim = dim
 
         # Projection after sinusoidally-encoding
-        self.mlp = nn.Sequential(
-            nn.Linear(dim, dim * 4),
-            nn.SiLU(),
-            nn.Linear(dim * 4, dim)
-        )
+        if module == 'prior':
+            self.mlp = nn.Sequential(
+                nn.Linear(dim, dim * 4),
+                nn.SiLU(),
+                nn.Linear(dim * 4, dim),
+                nn.LayerNorm(dim)
+            )
+            self.T = T
+
+        elif module == 'decoder':
+            self.mlp = nn.Sequential(
+                nn.Linear(dim, dim * 4),
+                nn.SiLU(),
+                nn.Linear(dim * 4, dim)
+            )
+        
+        self.module = module
+
 
     def forward(
             self,
@@ -59,36 +76,19 @@ class TimestepEmbedder(nn.Module):
         Returns:
             the sinusoidally-encoded and projected timesteps Tensor, of shape (B, self.dim)
         """
-        assert timesteps.dim() == 1, f'[TimestepEmbedder] Expected 1D timesteps, got shape: {timesteps.shape}'
-        self.debug = False
+        # return projected
+        assert timesteps.dim() == 1
+        # scale by the SAME T used in training
+        if self.module == 'prior':
+            t = timesteps.float() / max(self.T - 1, 1)
+        else:
+            t = timesteps.float() / 999.0  # fixed constant for decoder (or whatever worked well in your tests)
 
-        if self.debug:
-            print(f'[TimestepEmbedder] Input timesteps shape: {timesteps.shape}')
+        t = t.clamp_(1e-5, 1.0)
 
-        timesteps = timesteps.float() / 1000.0 # Normalize assuming T=1000
-        timesteps = torch.clamp(timesteps, min=1e-5, max=1.0)
-
-        half_dim = self.dim // 2
-        emb_scale = math.log(10000) / (half_dim - 1)
-        freqs = torch.exp(torch.arange(half_dim, device=timesteps.device) * -emb_scale)
-
-        if self.debug:
-            print(f'[TimestepEmbedder] freqs shape: {freqs.shape}')
-
-        # Broadcast and compute sinusoidal embedding
-        angles = timesteps.unsqueeze(1) * freqs.unsqueeze(0) # (B, half_dim)
-
-        if self.debug:
-            print(f'[TimestepEmbedder] angles shape: {angles.shape}')
-
-        emb = torch.cat([torch.sin(angles), torch.cos(angles)], dim=1) # (B, dim)
-
-        if self.debug:
-            print(f'[TimestepEmbedder] sinusoidal emb shape: {emb.shape}')
-
-        projected = self.mlp(emb)
-
-        if self.debug:
-            print(f'[TimestepEmbedder] projected emb shape: {projected.shape}')
-
-        return projected
+        half = self.dim // 2
+        # standard sinusoid base
+        freqs = torch.exp(torch.arange(half, device=t.device) * -(math.log(10000.0) / (half - 1)))
+        angles = t.unsqueeze(1) * freqs.unsqueeze(0)
+        emb = torch.cat([angles.sin(), angles.cos()], dim=1)
+        return self.mlp(emb)

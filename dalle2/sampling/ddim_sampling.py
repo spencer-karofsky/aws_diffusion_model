@@ -24,6 +24,7 @@ from typing import Tuple, Optional
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from dalle2.sampling.noise_scheduler import NoiseScheduler
 
@@ -73,9 +74,13 @@ class PriorDDIMSampler:
         eta: float = 0.0,
     ) -> None:
         self.scheduler = noise_scheduler
+        T_total = len(self.scheduler.alpha_bar_t)
+
+        ab = self.scheduler.alpha_bar_t
+
         self.num_inference_steps = num_inference_steps
         self.eta = float(eta)
-        self.timesteps = _make_timesteps(len(noise_scheduler.alpha_bar_t), num_inference_steps, noise_scheduler.alpha_bar_t.device)
+        self.timesteps = _make_timesteps(T_total, num_inference_steps, ab.device)
 
     def _predict_x0(
             self,
@@ -107,7 +112,7 @@ class PriorDDIMSampler:
             torch.sqrt(alpha_bar_next) * x0 +
             torch.sqrt(1 - alpha_bar_next - sigma ** 2) * eps +
             sigma * noise
-        )
+         )
     
     @torch.no_grad()
     def sample(
@@ -118,6 +123,8 @@ class PriorDDIMSampler:
         """
         Generate a CLIP image embedding from a CLIP text embedding using the learned prior.
         """
+        model.eval()
+
         B = z_txt.size(0)
         device = z_txt.device
         x_t = torch.randn(B, 512, device=device)
@@ -128,7 +135,7 @@ class PriorDDIMSampler:
             x0 = self._predict_x0(x_t, eps, t)
 
             if i == len(self.timesteps) - 1:
-                return x0 # already in embedding space, no range clamp necessary
+                return F.normalize(x0, dim=-1) # already in embedding space, no range clamp necessary
 
             t_next = torch.full((B,), self.timesteps[i + 1], dtype=torch.long, device=device)
             x_t = self._ddim_step(x0, eps, t, t_next)

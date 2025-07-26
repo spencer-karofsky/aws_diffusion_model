@@ -19,12 +19,12 @@ device = (
     else 'cpu'
 )
 
-prior_model = Prior(device=device)
+prior_model = Prior(device=device, T=200)
 optimizer = optim.AdamW(prior_model.parameters(), lr=1e-4)
-noise_scheduler = NoiseScheduler(T=1000)
+noise_scheduler = NoiseScheduler(T=200)
 
 image_path = os.path.join(
-    os.path.dirname(__file__), '..', 'data', 'local_datasets', 'coco', 'val2017', '000000000139.jpg'
+    os.path.dirname(__file__), '..', 'data', 'local_datasets', 'coco', 'val2017', '000000219578.jpg'
 )
 
 BATCH_SIZE = 8
@@ -62,4 +62,4 @@ trainer = PriorTrainer(
 )
 
 if __name__ == '__main__':
-    trainer.train(num_epochs=200, save_every=200)
+    trainer.train(num_epochs=1000, save_every=50)

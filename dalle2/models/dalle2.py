@@ -40,147 +40,79 @@ import os
 from typing import Union, List
 
 class DALLe2:
-    def __init__(
-            self,
-            prior_path: str,
-            decoder_path: str,
-            clip_encoder: CLIPEncoder,
-            prior_sampler: PriorDDIMSampler,
-            decoder_sampler: DecoderDDIMSampler,
-            H: int,
-            W: int,
-            T: int = 1000,
-            num_inference_timesteps: int = 30,
-            on_aws: bool = False,
-            debug: bool = False
-    ):
-        """
-        Runs inference on the trained DALL·E 2 prior and decoder.
-
-        Example Usage:
-            from dalle2 import DALLe2
-            dalle = DALLe2(...)
-            prompts = [
-                'a plaid sports car',
-                'panda juggling chairs',
-                'a glowing fox made of stardust leaping through a nebula'
-            ]
-            generated_images = dalle.generate(prompts)
-
-        Args:
-            prior_path: path to the trained prior
-            decoder_path: path to the trained decoder
-            clip_encoder: instantiated CLIP text and image encoder
-            prior_sampler: performs DDIM-based denoising of the latent CLIP image embedding during inference.
-            decoder_sampler: performs DDIM-based denoising of noisy images into final RGB outputs, conditioned on the CLIP image embedding.
-            H: image height (pixels)
-            W: image width (pixels)
-            T: total amount of noising/denoising timesteps
-            num_inference_timesteps: choose somewhere between 20 and 50 for the optimal quality/speed tradeoff
-            on_aws: configures everything for AWS (TODO need to define this functionality out more when migrating training to AWS)
-            debug: outputs relevant information (useful for debugging)
-        """
-        # Initialize device (ideally use CUDA; secondly, Metal; worst-case, use the CPU)
+    def __init__(self, prior_path, decoder_path, clip_encoder,
+                 prior_sampler, decoder_sampler, H, W,
+                 T=1000, num_inference_timesteps=30,
+                 on_aws=False, debug=False):
         self.device = (
-            'cuda' if torch.cuda.is_available() 
-            else 'mps' if torch.backends.mps.is_available() 
+            'cuda' if torch.cuda.is_available()
+            else 'mps' if torch.backends.mps.is_available()
             else 'cpu'
         )
-
-        # Try to load trainer prior and decoder
-        try:
-            if not os.path.exists(prior_path):
-                raise FileNotFoundError(f'Prior checkpoint not found at: {prior_path}')
-            if not os.path.exists(decoder_path):
-                raise FileNotFoundError(f'Decoder checkpoint not found at: {decoder_path}')
-
-            self.prior = Prior(device=self.device, debug=debug)
-            self.prior.load_state_dict(torch.load(prior_path, map_location=self.device), strict=False)
-            self.prior.to(self.device)
-            self.prior.eval()
-            if debug:
-                print('Successfully loaded the prior and switched to mode "eval".')
-
-            self.decoder = Decoder(device=self.device, debug=debug)
-            self.decoder.load_state_dict(torch.load(decoder_path, map_location=self.device), strict=False)
-            self.decoder.to(self.device)
-            self.decoder.eval()
-            if debug:
-                print('Successfully loaded the decoder and switched to mode "eval".')
-
-        except FileNotFoundError as e:
-            print('[ERROR] failed to load either the trained prior or decoder weights.')
-            raise e
-
-        except RuntimeError as e:
-            raise RuntimeError(f'Model loading failed — checkpoint might not match model architecture:\n{e}')
-
-        # Save params
-        self.clip_encoder = clip_encoder
-        self.prior_sampler = prior_sampler
-        self.decoder_sampler = decoder_sampler
-        self.H = H
-        self.W = W
-        self.T = T
         self.debug = debug
+        self.H, self.W = H, W
+        self.T = T
         self.num_inference_timesteps = num_inference_timesteps
 
-        # Timesteps configuration
-        self.TIMESTEP_DIM = 512 # Use same dimenstionality as for the other inputs (not a strict requirement, but maintains consistency)
-        self.t = torch.linspace(T - 1, 0, steps=num_inference_timesteps, dtype=torch.long)
-        
-        # AWS configuration
-        if on_aws:
-            raise NotImplementedError
-    
-    def generate(
-            self,
-            captions: Union[str, List[str]]
-    ) -> torch.Tensor:
-        """
-        Generate images conditioned on text captions/prompts, x-hat_0.
+        # Load models
+        self.prior = Prior(device=self.device, debug=debug)
+        self.prior.load_state_dict(torch.load(prior_path, map_location=self.device), strict=False)
+        self.prior.to(self.device).eval()
 
-        Args:
-            captions: either one (str) or multiple (list-form) text prompts to condition DALL·E 2 (maximum of 77 tokens per prompt)
-        
-        Returns:
-            img_generations: the images conditioned on the text prompts (of shape (len(captions), 3, H, W), where H and W are the image height and width (px))
-        """
-        self.debug = True
+        self.decoder = Decoder(device=self.device, debug=debug)
+        self.decoder.load_state_dict(torch.load(decoder_path, map_location=self.device), strict=False)
+        self.decoder.to(self.device).eval()
+
+        # Samplers (ensure same T/schedule as training when you constructed them)
+        self.prior_sampler = prior_sampler
+        self.decoder_sampler = decoder_sampler
+        # Also set them on the modules so .sample() without explicit arg works.
+        self.prior.sampler = prior_sampler
+        self.decoder.sampler = decoder_sampler
+
+        # CLIP encoder
+        self.clip_encoder = clip_encoder
+        try:
+            self.clip_encoder.to(self.device)  # if your CLIPEncoder implements .to()
+        except AttributeError:
+            pass
+
+    @torch.no_grad()
+    def generate(self, captions: Union[str, List[str]]) -> torch.Tensor:
         if isinstance(captions, str):
             captions = [captions]
 
-        # Step 1: Encode text prompts into multi-layer CLIP embeddings
-        text_emb = self.clip_encoder.encode_text(captions) # (B, 512)
-        B = text_emb.size(0)
+        # 1) Text → CLIP text embedding (B,512)
+        z_txt = self.clip_encoder.encode_text(captions)  # may return CPU tensor
+        z_txt = z_txt.to(self.device)
 
         if self.debug:
-            print(f'[DALLe2.generate] z_txt shape before reduction: {text_emb.shape}')
+            print(f'[DALLe2.generate] z_txt: {z_txt.shape} device={z_txt.device}')
 
-        # Step 2: Reduce 3-layer CLIP embeddings to single (B, 512)
+        # 2) Prior: DDIM denoise to predicted CLIP image embedding (B,512)
+        #    Prior.sample will expand to (B,3,512) internally.
+        z_img_hat = self.prior.sample(
+            z_txt=z_txt,
+            steps=self.num_inference_timesteps,
+            sampler=self.prior_sampler
+        )  # (B,512)
+
+        # Normalize to match decoder training distribution
+        z_img_hat = z_img_hat / (z_img_hat.norm(dim=-1, keepdim=True) + 1e-8)
 
         if self.debug:
-            print(f'[DALLe2.generate] z_txt shape after reduction: {text_emb.shape}')
+            m, s = z_img_hat.mean().item(), z_img_hat.std().item()
+            print(f'[DALLe2.generate] z_img_hat: {z_img_hat.shape} mean={m:.4f} std={s:.4f}')
 
-        # Step 3: Sample predicted image embeddings using the prior
-        image_embeddings_pred = self.prior.sample(
-            z_txt=text_emb,
-            sampler=self.prior_sampler,
-            steps=len(self.t)
+        # 3) Decoder: DDIM denoise to image (B,3,H,W)
+        imgs = self.decoder.sample(
+            z_img=z_img_hat,
+            steps=self.num_inference_timesteps,
+            sampler=self.decoder_sampler
         )
-        print(f'[DALLe2]: image embeddings predicted: {image_embeddings_pred.shape}, expected: ({B}, 512)')
-
-        assert image_embeddings_pred.dim() == 2 and image_embeddings_pred.shape[1] == 512, f'[Error] Prior output z_img must be shape (B, 512), got {image_embeddings_pred.shape}'
 
         if self.debug:
-            print(f'[DALLe2.generate] z_img (image embeddings) shape: {image_embeddings_pred.shape}')
+            print(f'[DALLe2.generate] imgs: {imgs.shape} '
+                  f'range=({imgs.min().item():.3f},{imgs.max().item():.3f})')
 
-        # Step 4: Decode image embeddings into full-resolution images
-        generated_images = self.decoder.sample(steps=self.num_inference_timesteps, z_img=image_embeddings_pred)
-        assert generated_images.shape[1:] == (3, self.H, self.W), \
-            f'[Error] Generated image shape should be (B, 3, {self.H}, {self.W}), got {generated_images.shape}'
-
-        if self.debug:
-            print(f'[DALLe2.generate] generated_images shape: {generated_images.shape}')
-
-        return generated_images
+        return imgs

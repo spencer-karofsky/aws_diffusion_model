@@ -1,68 +1,42 @@
-import torch
-from dalle2.models.dalle2 import DALLe2
-from dalle2.models.clip_encoding import CLIPEncoder
-from dalle2.sampling.noise_scheduler import NoiseScheduler
-from dalle2.sampling.ddim_sampling import PriorDDIMSampler, DecoderDDIMSampler
+"""
+run_inference.py: Runs the text-to-image generation pipeline on DALL·E 2
 
-# Constants
-H, W = 128, 128
-T = 1000
-num_steps = 30  # Inference steps — good default for DDIM
+Instructions (run from CLI):
+    cd [path to directory]
+    python -m dalle2.inference.run_inference
 
-# Load components
-clip_encoder = CLIPEncoder()
+Author:
+    * Spencer Karofsky (https://github.com/spencer-karofsky)
+"""
 
-prior_scheduler = NoiseScheduler(T=T)
-decoder_scheduler = NoiseScheduler(T=T)
-
-prior_sampler = PriorDDIMSampler(
-    noise_scheduler=prior_scheduler,
-    num_inference_steps=num_steps,
-    eta=0.0  # deterministic DDIM
-)
-
-decoder_sampler = DecoderDDIMSampler(
-    noise_scheduler=decoder_scheduler,
-    num_inference_steps=num_steps,
-    eta=0.0
-)
-
-# Initialize DALLe2
-dalle = DALLe2(
-    prior_path='dalle2/checkpoints/prior/final_trained_model.pth',
-    decoder_path='dalle2/checkpoints/decoder/epoch240_batch1.pth',
-    clip_encoder=clip_encoder,
-    prior_sampler=prior_sampler,
-    decoder_sampler=decoder_sampler,
-    H=H,
-    W=W,
-    T=T,
-    num_inference_timesteps=num_steps,
-    debug=False
-)
-
-state_dict = torch.load('dalle2/checkpoints/prior/final_trained_model.pth')
-print("Prior keys:", list(state_dict.keys())[:5])
-state_dict = torch.load('dalle2/checkpoints/decoder/final_trained_model.pth')
-print("Decoder keys:", list(state_dict.keys())[:5])
-
-
-# Prompt
-prompts = [
-    'a dog and cat lying together on an orange couch.',
-    'a dog and cat lying together on an orange couch.',
-]
-
-# Generate images
-with torch.no_grad():
-    images = dalle.generate(prompts) # shape [B, 3, H, W]
-
-import torchvision.utils as vutils
+from dalle2.inference.inference import DALLe2Text2Image
 import matplotlib.pyplot as plt
 
-# Assuming images ∈ [0, 1]
-grid = vutils.make_grid(images, nrow=3)
-plt.figure(figsize=(12, 6))
-plt.imshow(grid.permute(1, 2, 0).cpu())
-plt.axis('off')
-plt.show()
+def visualize(img_tensor):
+    gen = img_tensor.clamp(-1, 1)
+    vis = (gen + 1) / 2
+    img_np = vis.squeeze(0).permute(1, 2, 0).cpu().numpy()
+    plt.imshow(img_np)
+    plt.axis('off')
+    plt.show()
+
+def main():
+    prompt = ''
+    prompt = input('Enter a Text Prompt to Generate: ')
+
+    pipeline = DALLe2Text2Image(
+        prior_path='dalle2/checkpoints/prior/epoch150_batch1.pth',
+        decoder_path='dalle2/checkpoints/decoder/epoch550_batch1.pth',
+        prior_T=200,
+        start_T=20,
+        steps_prior=10,
+        cfg_scale=3.0,
+        decoder_t=200,
+        steps_decoder=50
+    )
+
+    img, _ = pipeline.text_to_image(prompt)
+    visualize(img)
+
+if __name__ == '__main__':
+    main()

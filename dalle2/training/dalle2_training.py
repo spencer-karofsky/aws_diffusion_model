@@ -28,6 +28,7 @@ from dalle2.models.decoder import Decoder
 from dalle2.utils.embeddings import get_timestep_embedding
 from dalle2.sampling.noise_scheduler import NoiseScheduler
 from dalle2.sampling.ddim_sampling import DecoderDDIMSampler
+from dalle2.models.clip_encoding import CLIPEncoder
 
 # Other imports
 from abc import ABC, abstractmethod
@@ -227,6 +228,23 @@ class BaseTrainer(ABC):
                 if self.module_type == 'prior':
                     # Inputs
                     z_txt = batch['z_txt'].to(self.device)
+
+                    # Build a CLIP empty-string embedding once (cache it outside the loop ideally)
+                    if not hasattr(self, "_null_txt"):
+                        clip = CLIPEncoder().to(self.device).eval()
+                        with torch.no_grad():
+                            self._null_txt = clip.encode_text([""]).to(self.device)  # [1,512]
+
+                    p_uncond = 0.2
+                    if self.module_type == 'prior':
+                        B = z_txt.shape[0]
+                        null_batch = self._null_txt.expand(B, -1)  # [B,512]
+                        mask = (torch.rand(B, device=self.device) < p_uncond).view(B, 1)  # True => use null
+                        z_txt_train = torch.where(mask, null_batch, z_txt)
+                    else:
+                        z_txt_train = z_txt  # unused for decoder
+
+
                     t = batch['t'].to(self.device)
                     z_img_noisy = batch['z_img_noisy'].to(self.device)
 
@@ -239,12 +257,18 @@ class BaseTrainer(ABC):
                         print(f'[BaseTrainer] t: {t.shape}')
                         print(f'[BaseTrainer] z_img_noisy: {z_img_noisy.shape}')
                         print(f'[BaseTrainer] eps_img (target noise): {eps_img.shape}')
-
-                    batch_input = (
-                        z_txt,
-                        t,
-                        z_img_noisy
-                    )
+                    if self.module_type == 'decoder':
+                        batch_input = (
+                            z_txt,
+                            t,
+                            z_img_noisy
+                        )
+                    elif self.module_type == 'prior':
+                        batch_input = (
+                            z_txt_train,
+                            t,
+                            z_img_noisy
+                        )
 
                 elif self.module_type == 'decoder':
                     # Inputs
@@ -268,6 +292,7 @@ class BaseTrainer(ABC):
                         t
                     )
 
+
                 eps_hat = self._run_batch(batch_input=batch_input)
 
                 # Compute loss between predicted and true noise
@@ -283,11 +308,7 @@ class BaseTrainer(ABC):
                 loss.backward()
                 self.optimizer.step()
 
-            print(f'[Train] eps_img (target) — mean: {eps_img.mean():.4f}, std: {eps_img.std():.4f}')
-            print(f'[Train] eps_pred (output) — mean: {eps_hat.mean():.4f}, std: {eps_hat.std():.4f}')
-            print(f'[Train] MSE(eps_pred, eps_img): {F.mse_loss(eps_hat, eps_img).item():.6f}')
-
-            print(f'Average Epoch loss: {epoch_loss / len(self.dataloader):.4f}')
+            print(f'Average Epoch Loss: {epoch_loss / len(self.dataloader):.4f}')
 
             if (epoch + 1) % save_every == 0:
                 self._save_current_model(epoch, 0)
@@ -298,7 +319,12 @@ class BaseTrainer(ABC):
         self._save_final_model()
 
 
-    def _run_intermediate_decoder_preview(self, epoch: int, loss: float, steps: int = 200):
+    def _run_intermediate_decoder_preview(
+            self,
+            epoch: int,
+            loss: float,
+            steps: int = 200
+    ) -> None:
         """
         Generate and save an image from the current decoder checkpoint using DDIM.
 
@@ -327,7 +353,7 @@ class BaseTrainer(ABC):
         vis_np = vis.squeeze(0).permute(1, 2, 0).cpu().numpy()
 
         # Output range check
-        print(f"[Epoch {epoch}] Output range: ({vis_np.min():.4f}, {vis_np.max():.4f})")
+        print(f'[Epoch {epoch}] Output range: ({vis_np.min():.4f}, {vis_np.max():.4f})')
 
         # Create directory if needed
         output_dir = 'dalle2/checkpoints/intermediate_outputs'
@@ -335,8 +361,8 @@ class BaseTrainer(ABC):
 
         # Save figure
         plt.imshow(vis_np)
-        plt.axis("off")
-        plt.title(f"Decoder Output (Epoch {epoch}), MSE={loss:.6f}")
+        plt.axis('off')
+        plt.title(f'Decoder Output (Epoch {epoch}), MSE={loss:.6f}')
         save_path = os.path.join(output_dir, f'epoch_{epoch}_output.png')
         plt.savefig(save_path, bbox_inches='tight', pad_inches=0.1)
         plt.close()

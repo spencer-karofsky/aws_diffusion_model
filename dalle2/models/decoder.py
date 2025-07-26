@@ -80,7 +80,7 @@ class Decoder(nn.Module):
 
         # Timestep embedding network
         self.TIMESTEP_DIM = 512 # Keep at 512 (or update self.TIMESTEP_DIM in dalle2.DALLe2.generate so they match)
-        self.timestep_embedder = TimestepEmbedder(dim=self.TIMESTEP_DIM)
+        self.timestep_embedder = TimestepEmbedder(dim=self.TIMESTEP_DIM, module='decoder')
 
         # Define U-Net hyperparameters and instantiate the U-Net
         self.IMG_SIZE = 128 # pixels

@@ -53,28 +53,32 @@ class PriorTransformer(nn.Module):
         self.debug = debug
 
         # Positional encoding
-        self.pos_emb = nn.Parameter(torch.randn(1, 4, dim))
+        self.pos_emb = nn.Parameter(torch.zeros(1, 4, dim))
+        nn.init.normal_(self.pos_emb, mean=0.0, std=0.05)
 
-        # Transformer decoder layer
+        self.txt_proj   = nn.Linear(dim, dim)
+        self.pre_ln_q   = nn.LayerNorm(dim)
+        self.pre_ln_m   = nn.LayerNorm(dim)
+        self.query_mlp  = nn.Sequential(
+            nn.LayerNorm(dim),
+            nn.Linear(dim, dim * 4),
+            nn.GELU(),
+            nn.Linear(dim * 4, dim),
+        )
+        self.gamma_direct = nn.Parameter(torch.zeros(1))
+
         decoder_layer = nn.TransformerDecoderLayer(
             d_model=dim,
             nhead=attention_heads,
             dim_feedforward=dim * 4,
             activation='gelu',
             batch_first=True,
+            dropout=0.0,
+            norm_first=True,
         )
+        self.transformer_decoder = nn.TransformerDecoder(decoder_layer, num_layers=transformer_blocks)
 
-        # Stack decoder layers
-        self.transformer_decoder = nn.TransformerDecoder(
-            decoder_layer,
-            num_layers=transformer_blocks
-        )
-
-        # Optional final linear projection back to dim
         self.output_proj = nn.Linear(dim, dim)
-
-        self.norm_q = nn.LayerNorm(dim)
-        self.norm_m = nn.LayerNorm(dim)
     
     def forward(
             self,
@@ -100,93 +104,36 @@ class PriorTransformer(nn.Module):
         Returns:
             the predicted noise of the CLIP image embedding, eps_theta, of shape (B, 512)
         """
-        if torch.isnan(z_T).any():
-            raise Exception('[PriorTransformer] NaNs in z_T')
-        if torch.isnan(z_txt).any():
-            raise Exception('[PriorTransformer] NaNs in z_txt')
-        if torch.isnan(t_emb).any():
-            raise Exception('[PriorTransformer] NaNs in t_emb')
+        # 1) Build query with SUM conditioning (z_T + t_emb + text)
+        txt_pooled = z_txt.mean(dim=1)
+        txt_cond  = self.txt_proj(txt_pooled)
 
-        assert t_emb.size(0) == z_T.size(0), f'[PriorTransformer] t_emb ({t_emb.size(0)}) has different batch size than z_T ({z_T.size(0)})'
-        B = t_emb.size(0)
+        query_vec = z_T + t_emb + txt_cond
+        query = query_vec.unsqueeze(1)
 
-        # Before concatenating z_T and t_emb, validate they both have the same shape
-        if self.debug:
-            print(f'[PriorTransformer] z_T actual shape: {z_T.shape}')
-            print(f'[PriorTransformer] z_T expected shape: ({B}, 512)')
-            print(f'[PriorTransformer] t_emb actual shape: {t_emb.shape}')
-            print(f'[PriorTransformer] t_emb expected shape: ({B}, 512)')
-
-        # Add timestep embedding to image embedding
-        query = z_T + t_emb
-
-        # Add sequence dimension to query (batch, 1, dim)
-        query = query.unsqueeze(1) # (B, 1, 512)
-
+        # Memory from tokens
         if z_txt.dim() == 2:
-            # Single token, add seq dim
-            memory = z_txt.unsqueeze(1)  # (B, 1, 512)
-            pos_slice = self.pos_emb[:, 1:2, :]
+            memory = z_txt.unsqueeze(1)
             expected_seq_len = 1
+            pos_slice = self.pos_emb[:, 1:2, :]
         else:
-            # Multiple tokens, no unsqueeze
-            memory = z_txt # (B, seq_len, 512)
+            memory = z_txt
             expected_seq_len = z_txt.size(1)
             pos_slice = self.pos_emb[:, 1:1 + expected_seq_len, :]
-        
-        assert query.shape == (B, 1, 512), f'[PriorTransformer] query shape {query.shape} must be ({B}, 1, 512)'
-        assert memory.shape == (B, expected_seq_len, 512), f'[PriorTransformer] memory shape {memory.shape} must be ({B}, {expected_seq_len}, 512)'
-        assert pos_slice.shape == (1, expected_seq_len, 512), f'[PriorTransformer] pos_slice shape {pos_slice.shape} must match memory shape {memory.shape}'
 
-        # Add positional encodings
-        query = query + self.pos_emb[:, 0:1, :]
+        # Positional encodings
+        query  = query  + self.pos_emb[:, 0:1, :]
         memory = memory + pos_slice
 
-        if self.debug:
-            print(f'[PriorTransformer] query actual shape: {query.shape}')
-            print(f'[PriorTransformer] query expected shape: ({B}, 1, 512)')
-    
-            print(f'[PriorTransformer] memory actual shape: {memory.shape}')
-            print(f'[PriorTransformer] memory expected shape: ({B}, {expected_seq_len}, 512)')
+        # Pre-norm for stability
+        query  = self.pre_ln_q(query)
+        memory = self.pre_ln_m(memory)
 
-        # For debugging
-        query_nan = torch.isnan(query).any()
-        if query_nan:
-            raise Exception('[PriorTransformer] NaNs in query')
-        memory_nan = torch.isnan(memory).any()
-        if memory_nan:
-            raise Exception('[PriorTransformer] NaNs in memory')
-
-        query = self.norm_q(query)
-        memory = self.norm_m(memory)
-
-        # For debugging
-        if not query_nan and torch.isnan(query).any():
-            raise Exception('[PriorTransformer] NaNs in query after applying nn.LayerNorm')
-        if not memory_nan and torch.isnan(memory).any():
-            raise Exception('[PriorTransformer] NaNs in memory after applying nn.LayerNorm')
-
-        # Decode (generate) the image embeddings
+        # 2) Cross-attention refinement
         decoded = self.transformer_decoder(tgt=query, memory=memory)
+        decoded = decoded.squeeze(1)
 
-        # For debugging
-        decoded_nan = torch.isnan(decoded).any()
-        if decoded_nan:
-            raise Exception('[PriorTransformer] NaNs in decoded after applying nn.TransformerDecoder')
-
-        # Project output
-        if decoded.dim() == 4:
-            # e.g., (B, 1, 3, 512) → (B, 3, 512)
-            if self.debug:
-                print(f'[PriorTransformer] Decoded had 4 dims, squeezing and averaging across token dim: {decoded.shape}')
-            decoded = decoded.squeeze(1).mean(dim=1)  # (B, 3, 512) → (B, 512)
-        elif decoded.dim() == 3 and decoded.shape[1] == 1:
-            # (B, 1, 512) → (B, 512)
-            decoded = decoded.squeeze(1)
-
-        eps_pred = self.output_proj(decoded)
-        
-        if self.debug:
-            print(f'[PriorTransformer] eps_pred shape: {eps_pred.shape}')
+        # 3) Gated direct residual path to prevent variance collapse
+        eps_pred = self.output_proj(decoded) + self.gamma_direct * self.query_mlp(query_vec)
 
         return eps_pred

@@ -93,7 +93,8 @@ class NoiseScheduler:
         Returns:
             tensor of shape (B) with beta values.
         """
-        return self.beta_t[t].to(t.device)[t]
+        return self.beta_t.to(t.device)[t]
+        # return self.beta_t[t].to(t.device)[t]
     
     def get_alpha(
             self,
@@ -109,7 +110,8 @@ class NoiseScheduler:
         Returns:
             tensor of shape (B) with alpha values.
         """
-        return self.alpha_t[t].to(t.device)[t]
+        return self.alpha_t.to(t.device)[t]
+        # return self.alpha_t[t].to(t.device)[t]
 
     def get_alpha_bar(
             self,
