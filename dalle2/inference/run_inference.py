@@ -25,8 +25,8 @@ def main():
     prompt = input('Enter a Text Prompt to Generate: ')
 
     pipeline = DALLe2Text2Image(
-        prior_path='dalle2/checkpoints/prior/epoch150_batch1.pth',
-        decoder_path='dalle2/checkpoints/decoder/epoch550_batch1.pth',
+        prior_path='dalle2/checkpoints/prior/epoch150_batch1_single_img.pth',
+        decoder_path='dalle2/checkpoints/decoder/epoch550_batch1_single_img.pth',
         prior_T=200,
         start_T=20,
         steps_prior=10,

@@ -55,6 +55,145 @@ from PIL import Image
 from torchvision import transforms
 from dalle2.models.clip_encoding import CLIPEncoder
 from dalle2.sampling.noise_scheduler import NoiseScheduler
+import random
+from typing import Tuple
+
+# class COCOPriorDataset(Dataset):
+#     def __init__(
+#         self,
+#         metadata_path: str,
+#         images_dir: str,
+#         batch_size: int,
+#         device: torch.device,
+#         noise_scheduler: NoiseScheduler,
+#         resize_size: int = 128,
+#         n_repeat: int = 64,  # number of samples
+#         seed: int = 42       # for reproducibility
+#     ):
+#         super().__init__()
+#         self.B = batch_size
+#         self.device = device
+#         self.noise_scheduler = noise_scheduler
+#         self.T = noise_scheduler.alpha_bar_t.shape[0]
+#         self.n_repeat = n_repeat
+
+#         # Deterministic sampling
+#         g = torch.Generator(device=device).manual_seed(seed)
+#         self.timesteps = torch.randint(0, self.T, (n_repeat,), generator=g, device=device)
+
+#         # Load and encode image
+#         self.df = pd.read_csv(metadata_path)
+#         self.images_dir = images_dir
+#         row = self.df.iloc[0]
+#         self.caption = row['caption']
+
+#         img_path = os.path.join(self.images_dir, os.path.basename(row['image_path']))
+#         image = Image.open(img_path).convert("RGB")
+
+#         self.transform = transforms.Compose([
+#             transforms.Resize((resize_size, resize_size), antialias=True),
+#             transforms.ToTensor(),
+#             transforms.Lambda(lambda x: x * 2 - 1)
+#         ])
+
+#         self.clip_encoder = CLIPEncoder().to(device)
+#         image_tensor = self.transform(image).unsqueeze(0).to(device)
+
+#         with torch.no_grad():
+#             self.z_img = self.clip_encoder.encode_image(image_tensor).squeeze(0).to(device)  # (512,)
+#             self.z_txt = self.clip_encoder.encode_text([self.caption]).squeeze(0).to(device)  # (512,)
+
+#         # Pre-sample all noise vectors
+#         self.noises = torch.randn(n_repeat, self.z_img.shape[0], generator=g, device=device)
+
+#     def __len__(self):
+#         return self.n_repeat
+
+#     def __getitem__(self, idx):
+#         t = torch.randint(0, self.T, (1,), device=self.device)
+#         eps = torch.randn(1, self.z_img.shape[0], device=self.device)
+#         z_img = self.z_img.unsqueeze(0)
+#         z_img_noisy = self.noise_scheduler.q_sample(z_img, t, eps)
+
+#         return {
+#             'z_txt': self.z_txt,                    # (512,)
+#             't': t.squeeze(0),                      # ()
+#             'z_img_noisy': z_img_noisy.squeeze(0),  # (512,)
+#             'eps_img': eps.squeeze(0),              # (512,)
+#             'z_img': self.z_img                     # (512,)
+#         }
+
+
+# class COCODecoderDataset(Dataset):
+#     def __init__(
+#         self,
+#         metadata_path: str,
+#         images_dir: str,
+#         device: torch.device,
+#         noise_scheduler: NoiseScheduler,
+#         resize_size: int = 64,
+#         n_repeat: int = 64 # number of times to repeat the single image
+#     ):
+#         super().__init__()
+#         self.device = device
+#         self.n_repeat = n_repeat
+#         self.noise_scheduler = noise_scheduler
+
+#         if not os.path.isfile(metadata_path):
+#             raise FileNotFoundError(f'metadata.csv not found at {metadata_path}')
+#         if not os.path.isdir(images_dir):
+#             raise FileNotFoundError(f'Image directory not found at {images_dir}')
+
+#         self.df = pd.read_csv(metadata_path)
+#         self.images_dir = images_dir
+#         self.resize_size = resize_size
+
+#         self.transform = transforms.Compose([
+#             transforms.Resize((resize_size, resize_size), antialias=True),
+#             transforms.ToTensor(),
+#             transforms.Lambda(lambda x: x * 2 - 1)
+#         ])
+
+#         self.clip_encoder = CLIPEncoder().to(device)
+#         self.noise_scheduler.alpha_bar_t = self.noise_scheduler.alpha_bar_t.to(device)
+#         self.T = self.noise_scheduler.alpha_bar_t.shape[0]
+
+#         # Only use the first image
+#         self.image_tensor = self._load_image_tensor(self.df.iloc[0]['image_path'])
+
+#         with torch.no_grad():
+#             self.z_img = self.clip_encoder.encode_image(self.image_tensor).to(self.device)
+#             self.z_img = self.z_img / self.z_img.norm(dim=-1, keepdim=True)
+
+#     def _load_image_tensor(self, img_path):
+#         if not os.path.isabs(img_path):
+#             img_path = os.path.join(self.images_dir, os.path.basename(img_path))
+#         if not os.path.isfile(img_path):
+#             raise FileNotFoundError(f'Image not found at {img_path}')
+#         image = Image.open(img_path).convert('RGB')
+#         return self.transform(image).to(self.device).unsqueeze(0) # (1, 3, H, W)
+
+#     def __len__(self):
+#         return self.n_repeat
+
+#     def __getitem__(self, idx):
+#         batch_size = self.image_tensor.shape[0]
+#         t = torch.randint(0, self.T, (batch_size,), device=self.device).long()
+
+#         x_t, eps_img = self.noise_scheduler.add_noise(self.image_tensor, t)
+
+#         with torch.no_grad():
+#             a_bar = self.noise_scheduler.get_alpha_bar(t).view(-1,1,1,1)
+#             x_t_re = (a_bar.sqrt() * self.image_tensor +
+#                     (1 - a_bar).sqrt() * eps_img)
+#             assert torch.allclose(x_t, x_t_re, atol=1e-6), 'Mismatch between x_t and eps_img!'
+
+#         return {
+#             'x_t': x_t.squeeze(0),
+#             'z_img': self.z_img.squeeze(0),
+#             't': t.squeeze(0),
+#             'eps_img': eps_img.squeeze(0)
+#         }
 
 class COCOPriorDataset(Dataset):
     def __init__(
@@ -65,29 +204,17 @@ class COCOPriorDataset(Dataset):
         device: torch.device,
         noise_scheduler: NoiseScheduler,
         resize_size: int = 128,
-        n_repeat: int = 64,  # number of samples
-        seed: int = 42       # for reproducibility
+        n_repeat: int = 1,
+        seed: int = 42
     ):
         super().__init__()
         self.B = batch_size
         self.device = device
         self.noise_scheduler = noise_scheduler
         self.T = noise_scheduler.alpha_bar_t.shape[0]
-        self.n_repeat = n_repeat
-
-        # Deterministic sampling
-        g = torch.Generator(device=device).manual_seed(seed)
-        self.timesteps = torch.randint(0, self.T, (n_repeat,), generator=g, device=device)
-
-        # Load and encode image
-        self.df = pd.read_csv(metadata_path)
         self.images_dir = images_dir
-        row = self.df.iloc[0]
-        self.caption = row['caption']
 
-        img_path = os.path.join(self.images_dir, os.path.basename(row['image_path']))
-        image = Image.open(img_path).convert("RGB")
-
+        self.df = pd.read_csv(metadata_path)
         self.transform = transforms.Compose([
             transforms.Resize((resize_size, resize_size), antialias=True),
             transforms.ToTensor(),
@@ -95,31 +222,57 @@ class COCOPriorDataset(Dataset):
         ])
 
         self.clip_encoder = CLIPEncoder().to(device)
-        image_tensor = self.transform(image).unsqueeze(0).to(device)
 
-        with torch.no_grad():
-            self.z_img = self.clip_encoder.encode_image(image_tensor).squeeze(0).to(device)  # (512,)
-            self.z_txt = self.clip_encoder.encode_text([self.caption]).squeeze(0).to(device)  # (512,)
-
-        # Pre-sample all noise vectors
-        self.noises = torch.randn(n_repeat, self.z_img.shape[0], generator=g, device=device)
+        # Deterministic timestep/noise generators
+        self.n_repeat = n_repeat
+        self.seed = seed
+        self.total_len = len(self.df) * n_repeat
 
     def __len__(self):
-        return self.n_repeat
+        return self.total_len
 
     def __getitem__(self, idx):
-        t = torch.randint(0, self.T, (1,), device=self.device)
-        eps = torch.randn(1, self.z_img.shape[0], device=self.device)
-        z_img = self.z_img.unsqueeze(0)
-        z_img_noisy = self.noise_scheduler.q_sample(z_img, t, eps)
+        row_idx = idx % len(self.df)
+        row = self.df.iloc[row_idx]
+        caption = row['caption']
+        img_path = os.path.join(self.images_dir, os.path.basename(row['image_path']))
+
+        image = Image.open(img_path).convert("RGB")
+        image_tensor = self.transform(image).unsqueeze(0).to(self.device)
+
+        with torch.no_grad():
+            z_img = self.clip_encoder.encode_image(image_tensor).squeeze(0).to(self.device)
+            z_txt = self.clip_encoder.encode_text([caption]).squeeze(0).to(self.device)
+
+        # Deterministic t, eps based on (idx + seed)
+        g = torch.Generator(device=self.device).manual_seed(self.seed + idx)
+        t = torch.randint(0, self.T, (1,), generator=g, device=self.device)
+        eps = torch.randn(1, z_img.shape[0], generator=g, device=self.device)
+
+        z_img_noisy = self.noise_scheduler.q_sample(z_img.unsqueeze(0), t, eps)
 
         return {
-            'z_txt': self.z_txt,                    # (512,)
-            't': t.squeeze(0),                      # ()
-            'z_img_noisy': z_img_noisy.squeeze(0),  # (512,)
-            'eps_img': eps.squeeze(0),              # (512,)
-            'z_img': self.z_img                     # (512,)
+            'z_txt': z_txt,
+            't': t.squeeze(0),
+            'z_img_noisy': z_img_noisy.squeeze(0),
+            'eps_img': eps.squeeze(0),
+            'z_img': z_img
         }
+    
+    def get_random_text_and_embedding(self) -> Tuple[torch.Tensor, torch.Tensor]:
+        idx = random.randint(0, len(self.df) - 1)
+        row = self.df.iloc[idx]
+        caption = row['caption']
+        img_path = os.path.join(self.images_dir, os.path.basename(row['image_path']))
+
+        image = Image.open(img_path).convert("RGB")
+        image_tensor = self.transform(image).unsqueeze(0).to(self.device)
+
+        with torch.no_grad():
+            z_img = self.clip_encoder.encode_image(image_tensor).squeeze(0).to(self.device)
+            z_txt = self.clip_encoder.encode_text([caption]).squeeze(0).to(self.device)
+
+        return z_txt, z_img
 
 
 class COCODecoderDataset(Dataset):
@@ -130,22 +283,15 @@ class COCODecoderDataset(Dataset):
         device: torch.device,
         noise_scheduler: NoiseScheduler,
         resize_size: int = 64,
-        n_repeat: int = 64 # number of times to repeat the single image
+        n_repeat: int = 1
     ):
         super().__init__()
         self.device = device
-        self.n_repeat = n_repeat
         self.noise_scheduler = noise_scheduler
-
-        if not os.path.isfile(metadata_path):
-            raise FileNotFoundError(f'metadata.csv not found at {metadata_path}')
-        if not os.path.isdir(images_dir):
-            raise FileNotFoundError(f'Image directory not found at {images_dir}')
-
-        self.df = pd.read_csv(metadata_path)
         self.images_dir = images_dir
         self.resize_size = resize_size
 
+        self.df = pd.read_csv(metadata_path)
         self.transform = transforms.Compose([
             transforms.Resize((resize_size, resize_size), antialias=True),
             transforms.ToTensor(),
@@ -156,40 +302,48 @@ class COCODecoderDataset(Dataset):
         self.noise_scheduler.alpha_bar_t = self.noise_scheduler.alpha_bar_t.to(device)
         self.T = self.noise_scheduler.alpha_bar_t.shape[0]
 
-        # Only use the first image
-        self.image_tensor = self._load_image_tensor(self.df.iloc[0]['image_path'])
-
-        with torch.no_grad():
-            self.z_img = self.clip_encoder.encode_image(self.image_tensor).to(self.device)
-            self.z_img = self.z_img / self.z_img.norm(dim=-1, keepdim=True)
-
-    def _load_image_tensor(self, img_path):
-        if not os.path.isabs(img_path):
-            img_path = os.path.join(self.images_dir, os.path.basename(img_path))
-        if not os.path.isfile(img_path):
-            raise FileNotFoundError(f'Image not found at {img_path}')
-        image = Image.open(img_path).convert('RGB')
-        return self.transform(image).to(self.device).unsqueeze(0) # (1, 3, H, W)
+        self.n_repeat = n_repeat
+        self.total_len = len(self.df) * n_repeat
 
     def __len__(self):
-        return self.n_repeat
+        return self.total_len
 
     def __getitem__(self, idx):
-        batch_size = self.image_tensor.shape[0]
-        t = torch.randint(0, self.T, (batch_size,), device=self.device).long()
+        row_idx = idx % len(self.df)
+        row = self.df.iloc[row_idx]
+        img_path = os.path.join(self.images_dir, os.path.basename(row['image_path']))
 
-        x_t, eps_img = self.noise_scheduler.add_noise(self.image_tensor, t)
+        image = Image.open(img_path).convert("RGB")
+        image_tensor = self.transform(image).unsqueeze(0).to(self.device)
 
         with torch.no_grad():
-            a_bar = self.noise_scheduler.get_alpha_bar(t).view(-1,1,1,1)
-            x_t_re = (a_bar.sqrt() * self.image_tensor +
-                    (1 - a_bar).sqrt() * eps_img)
-            assert torch.allclose(x_t, x_t_re, atol=1e-6), 'Mismatch between x_t and eps_img!'
+            z_img = self.clip_encoder.encode_image(image_tensor).to(self.device)
+            z_img = z_img / z_img.norm(dim=-1, keepdim=True)
+
+        t = torch.randint(0, self.T, (1,), device=self.device).long()
+        x_t, eps_img = self.noise_scheduler.add_noise(image_tensor, t)
+
+        a_bar = self.noise_scheduler.get_alpha_bar(t).view(-1, 1, 1, 1)
+        x_t_re = (a_bar.sqrt() * image_tensor + (1 - a_bar).sqrt() * eps_img)
+        assert torch.allclose(x_t, x_t_re, atol=1e-6), 'Mismatch between x_t and eps_img!'
 
         return {
             'x_t': x_t.squeeze(0),
-            'z_img': self.z_img.squeeze(0),
+            'z_img': z_img.squeeze(0),
             't': t.squeeze(0),
             'eps_img': eps_img.squeeze(0)
         }
+    
+    def get_random_clean_image_and_embedding(self):
+        idx = random.randint(0, len(self.df) - 1)
+        row = self.df.iloc[idx]
+        img_path = os.path.join(self.images_dir, os.path.basename(row['image_path']))
+        image = Image.open(img_path).convert("RGB")
+        image_tensor = self.transform(image).unsqueeze(0).to(self.device)
+
+        with torch.no_grad():
+            z_img = self.clip_encoder.encode_image(image_tensor).to(self.device)
+            z_img = z_img / z_img.norm(dim=-1, keepdim=True)
+
+        return image_tensor, z_img 
 

@@ -99,11 +99,6 @@ class Prior(nn.Module):
 
         # Initialize DDIM Sampler (DDIMSampler.sample is a fully-deterministic process)
         noise_scheduler = NoiseScheduler(T=T)
-        # After building every scheduler you use:
-        ab = noise_scheduler.alpha_bar_t
-        print("alpha_bar[0]=", ab[0].item(), "alpha_bar[T-1]=", ab[-1].item())
-        print("get_alpha_bar(0)=", noise_scheduler.get_alpha_bar(torch.tensor([0], device=ab.device)).item())
-        print("get_alpha_bar(T-1)=", noise_scheduler.get_alpha_bar(torch.tensor([len(ab)-1], device=ab.device)).item())
 
         self.sampler = PriorDDIMSampler(
             noise_scheduler=noise_scheduler,

@@ -20,14 +20,14 @@ device = (
 )
 
 prior_model = Prior(device=device, T=200)
-optimizer = optim.AdamW(prior_model.parameters(), lr=1e-4)
+optimizer = optim.AdamW(prior_model.parameters(), lr=1e-3)
 noise_scheduler = NoiseScheduler(T=200)
 
-image_path = os.path.join(
-    os.path.dirname(__file__), '..', 'data', 'local_datasets', 'coco', 'val2017', '000000219578.jpg'
-)
+# image_path = os.path.join(
+#     os.path.dirname(__file__), '..', 'data', 'local_datasets', 'coco', 'val2017', '000000219578.jpg'
+# )
 
-BATCH_SIZE = 8
+BATCH_SIZE = 128
 
 REPEATS = 256
 
@@ -38,7 +38,6 @@ metadata_path = os.path.normpath(os.path.join(
 images_dir = os.path.normpath(os.path.join(
     os.path.dirname(current_file), '..', 'data', 'local_datasets', 'coco', 'val2017'
 ))
-
 
 dataset = COCOPriorDataset(
     metadata_path=metadata_path,
@@ -62,4 +61,8 @@ trainer = PriorTrainer(
 )
 
 if __name__ == '__main__':
-    trainer.train(num_epochs=1000, save_every=50)
+    trainer.train(
+        num_epochs=10,
+        save_intermediate_output=40,
+        save_intermediate_model=200,
+    )

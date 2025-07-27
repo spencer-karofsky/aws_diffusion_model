@@ -25,7 +25,6 @@ from torch.utils.data import Dataset, DataLoader
 from dalle2.models.prior import Prior
 from dalle2.models.decoder import Decoder
 
-from dalle2.utils.embeddings import get_timestep_embedding
 from dalle2.sampling.noise_scheduler import NoiseScheduler
 from dalle2.sampling.ddim_sampling import DecoderDDIMSampler
 from dalle2.models.clip_encoding import CLIPEncoder
@@ -36,8 +35,7 @@ from typing import Union, Tuple
 import os
 from tqdm import tqdm
 import matplotlib.pyplot as plt
-from torchvision.utils import make_grid
-from PIL import Image
+import csv
 
 class BaseTrainer(ABC):
     def __init__(
@@ -192,7 +190,8 @@ class BaseTrainer(ABC):
     def train(
             self,
             num_epochs: int,
-            save_every: int = 50,
+            save_intermediate_output: int = 100,
+            save_intermediate_model: int = 1000,
             resume_checkpoint_name: str = None
     ) -> None:
         """
@@ -229,21 +228,19 @@ class BaseTrainer(ABC):
                     # Inputs
                     z_txt = batch['z_txt'].to(self.device)
 
-                    # Build a CLIP empty-string embedding once (cache it outside the loop ideally)
                     if not hasattr(self, "_null_txt"):
                         clip = CLIPEncoder().to(self.device).eval()
                         with torch.no_grad():
-                            self._null_txt = clip.encode_text([""]).to(self.device)  # [1,512]
+                            self._null_txt = clip.encode_text([""]).to(self.device) # [1,512]
 
                     p_uncond = 0.2
                     if self.module_type == 'prior':
                         B = z_txt.shape[0]
-                        null_batch = self._null_txt.expand(B, -1)  # [B,512]
-                        mask = (torch.rand(B, device=self.device) < p_uncond).view(B, 1)  # True => use null
+                        null_batch = self._null_txt.expand(B, -1) # [B,512]
+                        mask = (torch.rand(B, device=self.device) < p_uncond).view(B, 1) # True => use null
                         z_txt_train = torch.where(mask, null_batch, z_txt)
                     else:
-                        z_txt_train = z_txt  # unused for decoder
-
+                        z_txt_train = z_txt # unused for decoder
 
                     t = batch['t'].to(self.device)
                     z_img_noisy = batch['z_img_noisy'].to(self.device)
@@ -292,7 +289,6 @@ class BaseTrainer(ABC):
                         t
                     )
 
-
                 eps_hat = self._run_batch(batch_input=batch_input)
 
                 # Compute loss between predicted and true noise
@@ -308,13 +304,19 @@ class BaseTrainer(ABC):
                 loss.backward()
                 self.optimizer.step()
 
-            print(f'Average Epoch Loss: {epoch_loss / len(self.dataloader):.4f}')
+                # Save intermediate outputs
+                self._log_loss(epoch + 1, batch_i + 1, loss, plot_interval=500)
 
-            if (epoch + 1) % save_every == 0:
-                self._save_current_model(epoch, 0)
-            
-            if (epoch + 1) % 10 == 0 and self.module_type == 'decoder':
-                self._run_intermediate_decoder_preview(epoch + 1, loss, steps=50)
+                if (batch_i + 1) % save_intermediate_output == 0 and self.module_type == 'decoder':
+                    self._run_intermediate_decoder_preview(epoch + 1, batch_i + 1, loss, steps=50, n_img=3)
+                
+                if (batch_i + 1) % save_intermediate_output == 0 and self.module_type == 'prior':
+                    self.save_intermediate_prior_cosine(epoch + 1, batch_i + 1, loss, steps=50, n_embs=1)
+
+                if (batch_i + 1) % save_intermediate_model == 0:
+                    self._save_current_model(epoch + 1, batch_i + 1)
+
+            print(f'Average Epoch Loss: {epoch_loss / len(self.dataloader):.4f}')
 
         self._save_final_model()
 
@@ -322,53 +324,184 @@ class BaseTrainer(ABC):
     def _run_intermediate_decoder_preview(
             self,
             epoch: int,
+            batch: int,
             loss: float,
-            steps: int = 200
+            steps: int = 200,
+            n_img: int = 3
     ) -> None:
         """
         Generate and save an image from the current decoder checkpoint using DDIM.
 
         Args:
             epoch: used for naming the file
+            batch: the current batch
+            loss: the current batch loss
             steps: number of DDIM steps to use
+            n_img: number of sample images to generate
         """
-        print(f'[Epoch {epoch}] Running intermediate decoder inference preview...')
+        plt.close()
+        _, ax = plt.subplots(2, n_img, sharex=True, sharey=True)
 
-        x0 = self.dataloader.dataset.image_tensor.unsqueeze(0).to(self.device) # (1, 3, H, W)
-        z_img = self.dataloader.dataset.z_img.to(self.device) # (1, 512)
+        for i in range(n_img):
+            img_true, z_img = self.dataloader.dataset.get_random_clean_image_and_embedding()
 
-        sampler = DecoderDDIMSampler(self.noise_scheduler, num_inference_steps=steps)
+            sampler = DecoderDDIMSampler(self.noise_scheduler, num_inference_steps=steps)
 
-        self.train_module.eval()
-        with torch.no_grad():
-            generated_image = self.train_module.sample(
-                steps=steps,
-                z_img=z_img,
-                sampler=sampler
-            )
+            self.train_module.eval()
+            with torch.no_grad():
+                img_gen = self.train_module.sample(
+                    steps=steps,
+                    z_img=z_img,
+                    sampler=sampler
+                )
 
-        # Clamp and convert to [0, 1]
-        gen = generated_image.clamp(-1, 1)
-        vis = (gen + 1) / 2
-        vis_np = vis.squeeze(0).permute(1, 2, 0).cpu().numpy()
+            # Clamp and convert to [0, 1]
+            img_gen = img_gen.clamp(-1, 1)
+            img_gen = (img_gen + 1) / 2
+            img_gen = img_gen.squeeze(0).permute(1, 2, 0).cpu().numpy()
 
-        # Output range check
-        print(f'[Epoch {epoch}] Output range: ({vis_np.min():.4f}, {vis_np.max():.4f})')
+            ax[0, i].imshow(img_true)
+            ax[0, i].axis('off')
+            ax[0, i].set_title('target')
+
+            ax[0, i].imshow(img_gen)
+            ax[0, i].axis('off')
+            ax[0, i].set_title('generated')
 
         # Create directory if needed
-        output_dir = 'dalle2/checkpoints/intermediate_outputs'
+        output_dir = 'dalle2/checkpoints/decoder_intermediate_outputs'
         os.makedirs(output_dir, exist_ok=True)
 
         # Save figure
-        plt.imshow(vis_np)
-        plt.axis('off')
-        plt.title(f'Decoder Output (Epoch {epoch}), MSE={loss:.6f}')
-        save_path = os.path.join(output_dir, f'epoch_{epoch}_output.png')
+        plt.suptitle(f'Epoch: {epoch}, Batch: {batch}, Loss: {loss:.6f}')
+        save_path = os.path.join(output_dir, f'epoch_{epoch}_batch_{batch}_output.png')
         plt.savefig(save_path, bbox_inches='tight', pad_inches=0.1)
         plt.close()
-        print(f'[Epoch {epoch}] Saved output to: {save_path}')
 
         self.train_module.train()
+    
+    def save_intermediate_prior_cosine(
+            self,
+            epoch: int,
+            batch: int,
+            loss: float,
+            n_embs: int = 3
+    ) -> None:
+        """
+        Computes cosine similarity between predicted and true CLIP image embeddings
+        during Prior training and writes them to a CSV file.
+
+        Args:
+            epoch: current training epoch
+            batch: current training batch index
+            loss: current batch loss
+            n_embs: number of random embeddings to log (default = 3)
+        """
+        csv_path = 'dalle2/checkpoints/prior_intermediate_outputs/cosine_similarity_log.csv'
+        os.makedirs(os.path.dirname(csv_path), exist_ok=True)
+
+        records = []
+        for _ in range(n_embs):
+            z_txt, z_img_true = self.dataloader.dataset.get_random_text_and_embedding()
+
+            z_txt = z_txt.to(self.device).unsqueeze(0) # (1, 512)
+            z_img_true = z_img_true.to(self.device).unsqueeze(0) # (1, 512)
+
+            t_int = torch.randint(low=0, high=self.noise_scheduler.num_train_timesteps, size=(1,))
+            t = t_int.to(self.device).long()
+
+            # Add noise to z_img_true
+            noise = torch.randn_like(z_img_true)
+            alpha_bar = self.noise_scheduler.get_alpha_bar(t)
+            z_img_noisy = (alpha_bar.sqrt() * z_img_true) + ((1 - alpha_bar).sqrt() * noise)
+
+            # Predict noise using current prior
+            self.train_module.eval()
+            with torch.no_grad():
+                eps_hat = self.train_module(z_txt=z_txt, t=t, z_T=z_img_noisy)
+
+            self.train_module.train()
+
+            # Cosine similarity between predicted and true noise
+            cos_sim = F.cosine_similarity(eps_hat, noise, dim=-1).item()
+            records.append([epoch, batch, t_int.item(), cos_sim, loss])
+
+        # Write data to csv
+        write_header = not os.path.exists(csv_path)
+        with open(csv_path, 'a', newline='') as f:
+            writer = csv.writer(f)
+            if write_header:
+                writer.writerow(['epoch', 'batch', 'timestep', 'cosine_similarity', 'mse_loss'])
+            writer.writerows(records)
+    
+    def _log_loss(
+            self,
+            epoch: int,
+            batch: int,
+            mse_loss: float,
+            plot_interval: int = 500
+    ) -> None:
+        """
+        Logs the MSE loss to a file for each batch and periodically plots loss curve.
+
+        Args:
+            epoch: the current epoch
+            batch: the current batch
+            mse_loss: the MSE loss
+            plot_interval: how often (in batches) to regenerate the loss curve plot
+        """
+        # Ensure output directories exist
+        log_dir = 'dalle2/checkpoints/logs'
+        plot_dir = 'dalle2/checkpoints/plots'
+        os.makedirs(log_dir, exist_ok=True)
+        os.makedirs(plot_dir, exist_ok=True)
+
+        csv_path = os.path.join(log_dir, 'batch_losses.csv')
+        plot_path = os.path.join(plot_dir, 'loss_curve.png')
+
+        # Append the current loss to the CSV
+        write_header = not os.path.exists(csv_path)
+        with open(csv_path, 'a', newline='') as f:
+            writer = csv.writer(f)
+            if write_header:
+                writer.writerow(['epoch', 'batch', 'mse_loss'])
+            writer.writerow([epoch, batch, mse_loss.item()])
+
+        # Periodically regenerate loss plots
+        if (batch + 1) % plot_interval == 0:
+            # Load the entire csv
+            epochs, batches, losses = [], [], []
+            with open(csv_path, 'r') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    epochs.append(int(row['epoch']))
+                    batches.append(int(row['batch']))
+                    losses.append(float(row['mse_loss']))
+
+            plt.figure(figsize=(14, 6))
+
+            # Linear scale subplot
+            plt.subplot(1, 2, 1)
+            plt.plot(range(len(losses)), losses, label='Batch MSE Loss', linewidth=1.5)
+            plt.xlabel('Batch Index')
+            plt.ylabel('MSE Loss')
+            plt.title('Training Loss (Linear Scale)')
+            plt.grid(True)
+            plt.legend()
+
+            # Log scale subplot
+            plt.subplot(1, 2, 2)
+            plt.plot(range(len(losses)), losses, label='Batch MSE Loss (Log)', linewidth=1.5)
+            plt.xlabel('Batch Index')
+            plt.ylabel('MSE Loss (log)')
+            plt.title('Training Loss (Log Scale)')
+            plt.yscale('log')
+            plt.grid(True, which='both')
+            plt.legend()
+
+            plt.tight_layout()
+            plt.savefig(plot_path)
+            plt.close()
         
 class PriorTrainer(BaseTrainer):
     def __init__(self, **kwargs):
