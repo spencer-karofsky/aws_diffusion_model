@@ -9,7 +9,7 @@ import os
 from dalle2.models.prior import Prior
 from dalle2.sampling.noise_scheduler import NoiseScheduler
 from dalle2.training.dalle2_training import PriorTrainer
-from dalle2.data.dataset_utils_2 import COCOPriorDataset
+from dalle2.data.dataset_utils_2 import MidJourneyPriorDataset
 
 TARGET_IMG_SIZE = 128
 
@@ -20,26 +20,22 @@ device = (
 )
 
 prior_model = Prior(device=device, T=200)
-optimizer = optim.AdamW(prior_model.parameters(), lr=1e-3)
+optimizer = optim.AdamW(prior_model.parameters(), lr=1e-4)
 noise_scheduler = NoiseScheduler(T=200)
-
-# image_path = os.path.join(
-#     os.path.dirname(__file__), '..', 'data', 'local_datasets', 'coco', 'val2017', '000000219578.jpg'
-# )
 
 BATCH_SIZE = 128
 
-REPEATS = 256
+REPEATS = 1 # Keep at 1
 
 current_file = os.path.abspath(__file__)
 metadata_path = os.path.normpath(os.path.join(
-    os.path.dirname(current_file), '..', 'data', 'local_datasets', 'coco', 'metadata.csv'
+    os.path.dirname(current_file), '..', 'data', 'local_datasets', 'midjourney_v6', 'metadata.csv'
 ))
 images_dir = os.path.normpath(os.path.join(
-    os.path.dirname(current_file), '..', 'data', 'local_datasets', 'coco', 'val2017'
+    os.path.dirname(current_file), '..', 'data', 'local_datasets', 'midjourney_v6', 'images'
 ))
 
-dataset = COCOPriorDataset(
+dataset = MidJourneyPriorDataset(
     metadata_path=metadata_path,
     images_dir=images_dir,
     batch_size=BATCH_SIZE,
@@ -63,6 +59,6 @@ trainer = PriorTrainer(
 if __name__ == '__main__':
     trainer.train(
         num_epochs=10,
-        save_intermediate_output=40,
+        save_intermediate_output=5,
         save_intermediate_model=200,
     )

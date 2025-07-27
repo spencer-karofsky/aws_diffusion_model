@@ -8,7 +8,7 @@ import os
 from dalle2.models.decoder import Decoder
 from dalle2.sampling.noise_scheduler import NoiseScheduler
 from dalle2.training.dalle2_training import DecoderTrainer
-from dalle2.data.dataset_utils_2 import COCODecoderDataset
+from dalle2.data.dataset_utils_2 import MidJourneyDecoderDataset
 
 # Device Setup
 device = (
@@ -19,8 +19,8 @@ device = (
 
 # Constants
 TARGET_IMG_SIZE = 128
-BATCH_SIZE = 16
-REPEATS = 256
+BATCH_SIZE = 64
+REPEATS = 1 # Keep at 1
 
 # Model, optimizer, scheduler
 decoder_model = Decoder(device=device, debug=True)
@@ -33,14 +33,14 @@ noise_scheduler = NoiseScheduler(
 # Paths
 current_file = os.path.abspath(__file__)
 metadata_path = os.path.normpath(os.path.join(
-    os.path.dirname(current_file), '..', 'data', 'local_datasets', 'coco', 'metadata.csv'
+    os.path.dirname(current_file), '..', 'data', 'local_datasets', 'midjourney_v6', 'metadata.csv'
 ))
 images_dir = os.path.normpath(os.path.join(
-    os.path.dirname(current_file), '..', 'data', 'local_datasets', 'coco', 'val2017'
+    os.path.dirname(current_file), '..', 'data', 'local_datasets', 'midjourney_v6', 'images'
 ))
 
 # Dataset
-dataset = COCODecoderDataset(
+dataset = MidJourneyDecoderDataset(
     metadata_path=metadata_path,
     images_dir=images_dir,
     device=device,
@@ -65,7 +65,6 @@ if __name__ == '__main__':
     # Train the decoder
     trainer.train(
         num_epochs=10,
-        save_intermediate_output=100,
-        save_intermediate_model=1000,
-        resume_checkpoint_name='epoch4_batch2301.pth'
+        save_intermediate_output=50,
+        save_intermediate_model=200,
     )

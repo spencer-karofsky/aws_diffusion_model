@@ -305,21 +305,21 @@ class BaseTrainer(ABC):
                 self.optimizer.step()
 
                 # Save intermediate outputs
-                self._log_loss(epoch + 1, batch_i + 1, loss, plot_interval=500)
+                self._log_loss(epoch + 1, batch_i + 1, loss, plot_interval=save_intermediate_output)
 
                 if (batch_i + 1) % save_intermediate_output == 0 and self.module_type == 'decoder':
                     self._run_intermediate_decoder_preview(epoch + 1, batch_i + 1, loss, steps=50, n_img=3)
                 
                 if (batch_i + 1) % save_intermediate_output == 0 and self.module_type == 'prior':
-                    self.save_intermediate_prior_cosine(epoch + 1, batch_i + 1, loss, steps=50, n_embs=1)
+                    self.save_intermediate_prior_cosine(epoch + 1, batch_i + 1, loss, n_embs=1)
 
                 if (batch_i + 1) % save_intermediate_model == 0:
                     self._save_current_model(epoch + 1, batch_i + 1)
 
             print(f'Average Epoch Loss: {epoch_loss / len(self.dataloader):.4f}')
+            self._save_current_model(epoch + 1, batch_i + 1)
 
         self._save_final_model()
-
 
     def _run_intermediate_decoder_preview(
             self,
@@ -360,13 +360,17 @@ class BaseTrainer(ABC):
             img_gen = (img_gen + 1) / 2
             img_gen = img_gen.squeeze(0).permute(1, 2, 0).cpu().numpy()
 
-            ax[0, i].imshow(img_true)
+            # Process ground truth image
+            img_true_np = img_true.detach().cpu().squeeze(0).permute(1, 2, 0).numpy()
+            img_true_np = (img_true_np + 1) / 2  # optional: only if your images are [-1,1]
+
+            ax[0, i].imshow(img_true_np)
             ax[0, i].axis('off')
             ax[0, i].set_title('target')
 
-            ax[0, i].imshow(img_gen)
-            ax[0, i].axis('off')
-            ax[0, i].set_title('generated')
+            ax[1, i].imshow(img_gen)
+            ax[1, i].axis('off')
+            ax[1, i].set_title('generated')
 
         # Create directory if needed
         output_dir = 'dalle2/checkpoints/decoder_intermediate_outputs'
@@ -407,7 +411,9 @@ class BaseTrainer(ABC):
             z_txt = z_txt.to(self.device).unsqueeze(0) # (1, 512)
             z_img_true = z_img_true.to(self.device).unsqueeze(0) # (1, 512)
 
-            t_int = torch.randint(low=0, high=self.noise_scheduler.num_train_timesteps, size=(1,))
+
+            T = self.noise_scheduler.alpha_bar_t.shape[0]
+            t_int = torch.randint(low=0, high=T, size=(1,))
             t = t_int.to(self.device).long()
 
             # Add noise to z_img_true
@@ -424,7 +430,7 @@ class BaseTrainer(ABC):
 
             # Cosine similarity between predicted and true noise
             cos_sim = F.cosine_similarity(eps_hat, noise, dim=-1).item()
-            records.append([epoch, batch, t_int.item(), cos_sim, loss])
+            records.append([epoch, batch, t_int.item(), cos_sim, loss.item()])
 
         # Write data to csv
         write_header = not os.path.exists(csv_path)
@@ -456,8 +462,8 @@ class BaseTrainer(ABC):
         os.makedirs(log_dir, exist_ok=True)
         os.makedirs(plot_dir, exist_ok=True)
 
-        csv_path = os.path.join(log_dir, 'batch_losses.csv')
-        plot_path = os.path.join(plot_dir, 'loss_curve.png')
+        csv_path = os.path.join(log_dir, f'{self.module_type}_batch_losses.csv')
+        plot_path = os.path.join(plot_dir, f'{self.module_type}_loss_curve.png')
 
         # Append the current loss to the CSV
         write_header = not os.path.exists(csv_path)

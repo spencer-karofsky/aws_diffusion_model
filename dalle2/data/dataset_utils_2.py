@@ -347,3 +347,203 @@ class COCODecoderDataset(Dataset):
 
         return image_tensor, z_img 
 
+
+
+# datasets/midjourney_dropin.py
+from torch.utils.data import Dataset
+import torch, os, random, pandas as pd
+from PIL import Image
+from torchvision import transforms
+from typing import Tuple
+from dalle2.models.clip_encoding import CLIPEncoder
+from dalle2.sampling.noise_scheduler import NoiseScheduler
+
+
+def _resolve_path(p: str, images_dir: str) -> str:
+    """If CSV path is absolute, return as-is; else join with images_dir (by basename)."""
+    if os.path.isabs(p):
+        return p
+    if images_dir is None:
+        return p
+    return os.path.join(images_dir, os.path.basename(p))
+
+
+class MidJourneyPriorDataset(Dataset):
+    """
+    Drop-in replacement for COCOPriorDataset.
+
+    CSV schema expected (created by your prepare script):
+        caption,image_path[,grid_id,tile,original_url]
+    """
+    def __init__(
+        self,
+        metadata_path: str,
+        images_dir: str,
+        batch_size: int,
+        device: torch.device,
+        noise_scheduler: NoiseScheduler,
+        resize_size: int = 128,
+        n_repeat: int = 1,
+        seed: int = 42
+    ):
+        super().__init__()
+        self.B = batch_size
+        self.device = device
+        self.noise_scheduler = noise_scheduler
+        self.T = noise_scheduler.alpha_bar_t.shape[0]
+        self.images_dir = images_dir
+
+        if not os.path.isfile(metadata_path):
+            raise FileNotFoundError(f'metadata.csv not found at {metadata_path}')
+        self.df = pd.read_csv(metadata_path)
+
+        self.transform = transforms.Compose([
+            transforms.Resize((resize_size, resize_size), antialias=True),
+            transforms.ToTensor(),
+            transforms.Lambda(lambda x: x * 2 - 1)
+        ])
+
+        self.clip_encoder = CLIPEncoder().to(device).eval()
+
+        self.n_repeat = n_repeat
+        self.seed = seed
+        self.total_len = len(self.df) * n_repeat
+
+    def __len__(self):
+        return self.total_len
+
+    def __getitem__(self, idx):
+        row_idx = idx % len(self.df)
+        row = self.df.iloc[row_idx]
+        caption = row['caption']
+        img_path_csv = str(row['image_path'])
+        img_path = _resolve_path(img_path_csv, self.images_dir)
+
+        if not os.path.isfile(img_path):
+            raise FileNotFoundError(f'Image not found at {img_path}')
+
+        image = Image.open(img_path).convert('RGB')
+        image_tensor = self.transform(image).unsqueeze(0).to(self.device)
+
+        with torch.no_grad():
+            z_img = self.clip_encoder.encode_image(image_tensor).squeeze(0).to(self.device)
+            z_txt = self.clip_encoder.encode_text([caption]).squeeze(0).to(self.device)
+
+        # Deterministic t/eps tied to idx
+        g = torch.Generator(device=self.device).manual_seed(self.seed + idx)
+        t = torch.randint(0, self.T, (1,), generator=g, device=self.device)
+        eps = torch.randn(1, z_img.shape[0], generator=g, device=self.device)
+
+        z_img_noisy = self.noise_scheduler.q_sample(z_img.unsqueeze(0), t, eps)
+
+        return {
+            'z_txt': z_txt,
+            't': t.squeeze(0),
+            'z_img_noisy': z_img_noisy.squeeze(0),
+            'eps_img': eps.squeeze(0),
+            'z_img': z_img
+        }
+
+    def get_random_text_and_embedding(self) -> Tuple[torch.Tensor, torch.Tensor]:
+        idx = random.randint(0, len(self.df) - 1)
+        row = self.df.iloc[idx]
+        caption = row['caption']
+        img_path_csv = str(row['image_path'])
+        img_path = _resolve_path(img_path_csv, self.images_dir)
+
+        image = Image.open(img_path).convert('RGB')
+        image_tensor = self.transform(image).unsqueeze(0).to(self.device)
+
+        with torch.no_grad():
+            z_img = self.clip_encoder.encode_image(image_tensor).squeeze(0).to(self.device)
+            z_txt = self.clip_encoder.encode_text([caption]).squeeze(0).to(self.device)
+
+        return z_txt, z_img
+
+
+class MidJourneyDecoderDataset(Dataset):
+    """
+    Drop-in replacement for COCODecoderDataset.
+
+    CSV schema expected (created by your prepare script):
+        caption,image_path[,grid_id,tile,original_url]
+    """
+    def __init__(
+        self,
+        metadata_path: str,
+        images_dir: str,
+        device: torch.device,
+        noise_scheduler: NoiseScheduler,
+        resize_size: int = 64,
+        n_repeat: int = 1
+    ):
+        super().__init__()
+        self.device = device
+        self.noise_scheduler = noise_scheduler
+        self.images_dir = images_dir
+
+        if not os.path.isfile(metadata_path):
+            raise FileNotFoundError(f'metadata.csv not found at {metadata_path}')
+        self.df = pd.read_csv(metadata_path)
+
+        self.transform = transforms.Compose([
+            transforms.Resize((resize_size, resize_size), antialias=True),
+            transforms.ToTensor(),
+            transforms.Lambda(lambda x: x * 2 - 1)
+        ])
+
+        self.clip_encoder = CLIPEncoder().to(device).eval()
+        self.noise_scheduler.alpha_bar_t = self.noise_scheduler.alpha_bar_t.to(device)
+        self.T = self.noise_scheduler.alpha_bar_t.shape[0]
+
+        self.n_repeat = n_repeat
+        self.total_len = len(self.df) * n_repeat
+
+    def __len__(self):
+        return self.total_len
+
+    def __getitem__(self, idx):
+        row_idx = idx % len(self.df)
+        row = self.df.iloc[row_idx]
+        img_path_csv = str(row['image_path'])
+        img_path = _resolve_path(img_path_csv, self.images_dir)
+
+        if not os.path.isfile(img_path):
+            raise FileNotFoundError(f'Image not found at {img_path}')
+
+        image = Image.open(img_path).convert('RGB')
+        image_tensor = self.transform(image).unsqueeze(0).to(self.device) # (1, 3, H, W)
+
+        with torch.no_grad():
+            z_img = self.clip_encoder.encode_image(image_tensor).to(self.device) # (1, 512)
+            z_img = z_img / z_img.norm(dim=-1, keepdim=True)
+
+        t = torch.randint(0, self.T, (1,), device=self.device).long()
+        x_t, eps_img = self.noise_scheduler.add_noise(image_tensor, t)
+
+        # Sanity check
+        a_bar = self.noise_scheduler.get_alpha_bar(t).view(-1, 1, 1, 1)
+        x_t_re = a_bar.sqrt() * image_tensor + (1 - a_bar).sqrt() * eps_img
+        assert torch.allclose(x_t, x_t_re, atol=1e-6), 'Mismatch between x_t and eps_img!'
+
+        return {
+            'x_t': x_t.squeeze(0),
+            'z_img': z_img.squeeze(0),
+            't': t.squeeze(0),
+            'eps_img': eps_img.squeeze(0)
+        }
+
+    def get_random_clean_image_and_embedding(self):
+        idx = random.randint(0, len(self.df) - 1)
+        row = self.df.iloc[idx]
+        img_path_csv = str(row['image_path'])
+        img_path = _resolve_path(img_path_csv, self.images_dir)
+
+        image = Image.open(img_path).convert('RGB')
+        image_tensor = self.transform(image).unsqueeze(0).to(self.device)
+
+        with torch.no_grad():
+            z_img = self.clip_encoder.encode_image(image_tensor).to(self.device)
+            z_img = z_img / z_img.norm(dim=-1, keepdim=True)
+
+        return image_tensor, z_img
