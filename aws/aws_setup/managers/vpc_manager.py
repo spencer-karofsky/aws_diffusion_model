@@ -403,23 +403,22 @@ class VPCSecurityManager(VPCSecurityInterface):
             True/False to indicate success/failure
         """
         try:
-            response = self.client.create_security_group(Description=self.description,
-                                                         GroupName=self.group_name,
-                                                         VpcId=self.vpc_id)
+            response = self.client.create_security_group(
+                Description=self.description,
+                GroupName=self.group_name,
+                VpcId=self.vpc_id
+            )
+            self.security_group_id = response['GroupId']
+            logger.info(f'[SUCCESS] created security group')
         except ClientError as e:
             logger.error(f'[FAIL] cannot create security group ({e})')
             return False
-        logger.info(f'[SUCCESS] created security group')
-        self.security_group_id = response['GroupId']
+
+        success = True
         if egress:
-            status = self._authorize_all_egress()
-            if status:
-                return True
-            return False
+            success &= self._authorize_all_egress()
         if ssh:
-            status = self._authorize_all_ingress()
-            if status:
-                return True
-            return False
-        return True
+            success &= self._authorize_all_ingress()
+
+        return success
     
