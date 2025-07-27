@@ -53,6 +53,7 @@ trainer = DecoderTrainer(
     model_save_name='decoder_model_overfit',
     debug=False,
     shuffle=True,
+    on_aws=True
 )
 
 if __name__ == '__main__':

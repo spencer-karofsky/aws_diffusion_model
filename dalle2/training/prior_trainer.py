@@ -49,7 +49,8 @@ trainer = PriorTrainer(
     batch_size=BATCH_SIZE,
     model_save_name='prior_model_overfit',
     debug=False,
-    shuffle=False
+    shuffle=False,
+    on_aws=True
 )
 
 if __name__ == '__main__':

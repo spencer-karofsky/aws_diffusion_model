@@ -107,20 +107,40 @@ class BaseTrainer(ABC):
             print(f'Number of training batches: {len(self.dataloader)}')
     
     def _configure_for_aws(self) -> None:
-        """Prepare S3 for artifact uploads."""
-        self.s3_bucket = 'dalle2-outputs'
+        """
+        Prepare S3 for artifact uploads.
+        """
+        self.outputs_bucket = 'dalle2-outputs'
+        self.models_bucket = 'dalle2-models'
         self.s3 = boto3.client('s3')
+
 
     
     def _s3_put(self, local_path: str, key: str):
+        """
+        Upload file to S3. 
+        - Keys under {prior|decoder}/checkpoints/* go to the models bucket.
+        - Everything else goes to the outputs bucket.
+        """
         try:
-            if self.on_aws:
-                # ensure client exists even if _configure_for_aws wasn't called
-                if not hasattr(self, "s3"):
-                    self.s3 = boto3.client("s3")
-                self.s3.upload_file(local_path, self.s3_bucket, key)
+            if not self.on_aws:
+                return
+
+            if not hasattr(self, "s3"):
+                self.s3 = boto3.client("s3")
+
+            # Route by key
+            is_checkpoint = (
+                key.startswith("prior/checkpoints/")
+                or key.startswith("decoder/checkpoints/")
+                or key.endswith(".pth")
+            )
+            bucket = self.models_bucket if is_checkpoint else self.outputs_bucket
+
+            self.s3.upload_file(local_path, bucket, key)
         except Exception as e:
-            print(f"[WARN] S3 upload failed: {e}")
+            print(f"[WARN] S3 upload failed for key '{key}': {e}")
+
 
 
     
@@ -205,13 +225,21 @@ class BaseTrainer(ABC):
 
     def _upload_file(self, local_path: str, key: str):
         """
-        Utility: put file to S3 and clean up.
+        Utility: upload file to the appropriate S3 bucket and remove local file.
         """
         if not hasattr(self, "s3"):
             self.s3 = boto3.client("s3")
-        self.s3.upload_file(local_path, self.s3_bucket, key)
-        os.remove(local_path)
 
+        is_checkpoint = (
+            key.startswith("prior/checkpoints/")
+            or key.startswith("decoder/checkpoints/")
+            or key.endswith(".pth")
+        )
+        bucket = getattr(self, "models_bucket", "dalle2-models") if is_checkpoint \
+                else getattr(self, "outputs_bucket", "dalle2-outputs")
+
+        self.s3.upload_file(local_path, bucket, key)
+        os.remove(local_path)
 
     def train(
             self,
