@@ -135,6 +135,6 @@ class Dalle2InfrastructureProvisioner:
 
 
 if __name__ == '__main__':
-    raise Exception('Process Completed') # Uncomment when complete to prevent re-running AWS code
+    #raise Exception('Process Completed') # Uncomment when complete to prevent re-running AWS code
     provisioner = Dalle2InfrastructureProvisioner()
     provisioner.run()

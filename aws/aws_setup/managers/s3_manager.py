@@ -2,10 +2,11 @@
 Implements all S3 functionalities.
 """
 import boto3
-from aws_setup.utils.logger import logger
-from aws_setup.interfaces.s3_interface import S3BucketInterface, S3ObjectInterface
 from botocore.exceptions import ClientError
 from typing import List, Tuple
+
+from ..utils.logger import logger
+from ..interfaces.s3_interface import S3BucketInterface, S3ObjectInterface
 
 class S3BucketManager(S3BucketInterface):
     def __init__(self):

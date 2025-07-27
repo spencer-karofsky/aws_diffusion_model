@@ -1,10 +1,9 @@
 """
 prior_trainer.py: trains the prior model on a single image (for overfitting test).
 """
+import os
 import torch
 import torch.optim as optim
-
-import os
 
 from dalle2.models.prior import Prior
 from dalle2.sampling.noise_scheduler import NoiseScheduler
@@ -21,19 +20,15 @@ device = (
 
 prior_model = Prior(device=device, T=200)
 optimizer = optim.AdamW(prior_model.parameters(), lr=1e-4)
-noise_scheduler = NoiseScheduler(T=200)
+noise_scheduler = NoiseScheduler(T=200, schedule_type='cosine')
 
-BATCH_SIZE = 128
+# Start conservatively; raise once it runs stably.
+BATCH_SIZE = 64
+REPEATS = 1
 
-REPEATS = 1 # Keep at 1
-
-current_file = os.path.abspath(__file__)
-metadata_path = os.path.normpath(os.path.join(
-    os.path.dirname(current_file), '..', 'data', 'local_datasets', 'midjourney_v6', 'metadata.csv'
-))
-images_dir = os.path.normpath(os.path.join(
-    os.path.dirname(current_file), '..', 'data', 'local_datasets', 'midjourney_v6', 'images'
-))
+# --- S3 paths ---
+metadata_path = "s3://dalle2-data/train_img/metadata.csv"
+images_dir = "s3://dalle2-data/train_img"
 
 dataset = MidJourneyPriorDataset(
     metadata_path=metadata_path,
@@ -42,7 +37,8 @@ dataset = MidJourneyPriorDataset(
     resize_size=TARGET_IMG_SIZE,
     device=device,
     noise_scheduler=noise_scheduler,
-    n_repeat=REPEATS
+    n_repeat=REPEATS,
+    # cache_dir="/home/ec2-user/dalle2_cache",  # if your dataset util supports it
 )
 
 trainer = PriorTrainer(

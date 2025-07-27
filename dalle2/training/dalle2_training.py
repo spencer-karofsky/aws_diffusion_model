@@ -34,8 +34,14 @@ from abc import ABC, abstractmethod
 from typing import Union, Tuple
 import os
 from tqdm import tqdm
-import matplotlib.pyplot as plt
 import csv
+import boto3
+import tempfile
+
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
 
 class BaseTrainer(ABC):
     def __init__(
@@ -101,10 +107,22 @@ class BaseTrainer(ABC):
             print(f'Number of training batches: {len(self.dataloader)}')
     
     def _configure_for_aws(self) -> None:
-        """
-        Configure resources for AWS (TODO)
-        """
-        raise NotImplementedError
+        """Prepare S3 for artifact uploads."""
+        self.s3_bucket = 'dalle2-outputs'
+        self.s3 = boto3.client('s3')
+
+    
+    def _s3_put(self, local_path: str, key: str):
+        try:
+            if self.on_aws:
+                # ensure client exists even if _configure_for_aws wasn't called
+                if not hasattr(self, "s3"):
+                    self.s3 = boto3.client("s3")
+                self.s3.upload_file(local_path, self.s3_bucket, key)
+        except Exception as e:
+            print(f"[WARN] S3 upload failed: {e}")
+
+
     
     @property
     @abstractmethod
@@ -155,37 +173,45 @@ class BaseTrainer(ABC):
         """
         pass
     
-    def _save_current_model(
-            self,
-            epoch: int,
-            batch_i: int
-    ) -> None:
-        """
-        Saves the partially-trained model, either locally or to S3
+    def _save_current_model(self, epoch: int, batch_i: int) -> None:
+        fname = f'epoch{epoch}_batch{batch_i}.pth'
+        if self.on_aws:
+            # save to a temp file then upload
+            import tempfile
+            with tempfile.TemporaryDirectory() as td:
+                local_path = os.path.join(td, fname)
+                torch.save(self.train_module.state_dict(), local_path)
+                key = f'{self.module_type}/checkpoints/{fname}'
+                self._s3_put(local_path, key)
+        else:
+            os.makedirs(f'dalle2/checkpoints/{self.module_type}', exist_ok=True)
+            save_path = f'dalle2/checkpoints/{self.module_type}/{fname}'
+            torch.save(self.train_module.state_dict(), save_path)
 
-        Args:
-            epoch: the current epoch
-            batch: the current batch index
-        """
-        if self.on_aws:
-            # Save to S3 bucket
-            raise NotImplementedError
-        else:
-            # Save to local directory
-            save_path = f'dalle2/checkpoints/{self.module_type}/epoch{epoch + 1}_batch{batch_i + 1}.pth'
-            torch.save(self.train_module.state_dict(), save_path)
-    
     def _save_final_model(self) -> None:
-        """
-        Saves the final trained model
-        """
+        fname = 'final_trained_model.pth'
         if self.on_aws:
-            # Save to S3 bucket
-            raise NotImplementedError
+            import tempfile
+            with tempfile.TemporaryDirectory() as td:
+                local_path = os.path.join(td, fname)
+                torch.save(self.train_module.state_dict(), local_path)
+                key = f'{self.module_type}/checkpoints/{fname}'
+                self._s3_put(local_path, key)
         else:
-            # Save to local directory
-            save_path = f'dalle2/checkpoints/{self.module_type}/final_trained_model.pth'
+            os.makedirs(f'dalle2/checkpoints/{self.module_type}', exist_ok=True)
+            save_path = f'dalle2/checkpoints/{self.module_type}/{fname}'
             torch.save(self.train_module.state_dict(), save_path)
+
+
+    def _upload_file(self, local_path: str, key: str):
+        """
+        Utility: put file to S3 and clean up.
+        """
+        if not hasattr(self, "s3"):
+            self.s3 = boto3.client("s3")
+        self.s3.upload_file(local_path, self.s3_bucket, key)
+        os.remove(local_path)
+
 
     def train(
             self,
@@ -382,7 +408,13 @@ class BaseTrainer(ABC):
         plt.savefig(save_path, bbox_inches='tight', pad_inches=0.1)
         plt.close()
 
+        # NEW: upload to S3
+        if self.on_aws:
+            key = f"decoder/intermediate_outputs/epoch_{epoch}_batch_{batch}_output.png"
+            self._s3_put(save_path, key)
+
         self.train_module.train()
+
     
     def save_intermediate_prior_cosine(
             self,
@@ -439,6 +471,12 @@ class BaseTrainer(ABC):
             if write_header:
                 writer.writerow(['epoch', 'batch', 'timestep', 'cosine_similarity', 'mse_loss'])
             writer.writerows(records)
+
+        # NEW: upload to S3
+        if self.on_aws:
+            key = 'prior/intermediate_outputs/cosine_similarity_log.csv'
+            self._s3_put(csv_path, key)
+
     
     def _log_loss(
             self,
@@ -448,13 +486,8 @@ class BaseTrainer(ABC):
             plot_interval: int = 500
     ) -> None:
         """
-        Logs the MSE loss to a file for each batch and periodically plots loss curve.
-
-        Args:
-            epoch: the current epoch
-            batch: the current batch
-            mse_loss: the MSE loss
-            plot_interval: how often (in batches) to regenerate the loss curve plot
+        Logs the MSE loss to CSV each batch and periodically writes a loss plot.
+        When self.on_aws is True, mirrors artifacts to s3://dalle2-outputs/.
         """
         # Ensure output directories exist
         log_dir = 'dalle2/checkpoints/logs'
@@ -471,11 +504,27 @@ class BaseTrainer(ABC):
             writer = csv.writer(f)
             if write_header:
                 writer.writerow(['epoch', 'batch', 'mse_loss'])
-            writer.writerow([epoch, batch, mse_loss.item()])
+            writer.writerow([epoch, batch, float(mse_loss.item() if hasattr(mse_loss, "item") else mse_loss)])
+
+        # Mirror CSV to S3 every batch
+        if getattr(self, "on_aws", False):
+            try:
+                # Prefer helper if present
+                if hasattr(self, "_s3_put"):
+                    self._s3_put(csv_path, f"{self.module_type}/logs/{self.module_type}_batch_losses.csv")
+                else:
+                    # Fallback direct upload
+                    if not hasattr(self, "s3"):
+                        self.s3 = boto3.client("s3")
+                        self.s3_bucket = getattr(self, "s3_bucket", "dalle2-outputs")
+                    self.s3.upload_file(csv_path, self.s3_bucket,
+                                        f"{self.module_type}/logs/{self.module_type}_batch_losses.csv")
+            except Exception as e:
+                print(f"[WARN] S3 upload (CSV) failed: {e}")
 
         # Periodically regenerate loss plots
         if (batch + 1) % plot_interval == 0:
-            # Load the entire csv
+            # Load the csv to build the curve
             epochs, batches, losses = [], [], []
             with open(csv_path, 'r') as f:
                 reader = csv.DictReader(f)
@@ -486,7 +535,7 @@ class BaseTrainer(ABC):
 
             plt.figure(figsize=(14, 6))
 
-            # Linear scale subplot
+            # Linear scale
             plt.subplot(1, 2, 1)
             plt.plot(range(len(losses)), losses, label='Batch MSE Loss', linewidth=1.5)
             plt.xlabel('Batch Index')
@@ -495,7 +544,7 @@ class BaseTrainer(ABC):
             plt.grid(True)
             plt.legend()
 
-            # Log scale subplot
+            # Log scale
             plt.subplot(1, 2, 2)
             plt.plot(range(len(losses)), losses, label='Batch MSE Loss (Log)', linewidth=1.5)
             plt.xlabel('Batch Index')
@@ -508,6 +557,21 @@ class BaseTrainer(ABC):
             plt.tight_layout()
             plt.savefig(plot_path)
             plt.close()
+
+            # Mirror plot to S3
+            if getattr(self, "on_aws", False):
+                try:
+                    if hasattr(self, "_s3_put"):
+                        self._s3_put(plot_path, f"{self.module_type}/plots/{self.module_type}_loss_curve.png")
+                    else:
+                        if not hasattr(self, "s3"):
+                            self.s3 = boto3.client("s3")
+                            self.s3_bucket = getattr(self, "s3_bucket", "dalle2-outputs")
+                        self.s3.upload_file(plot_path, self.s3_bucket,
+                                            f"{self.module_type}/plots/{self.module_type}_loss_curve.png")
+                except Exception as e:
+                    print(f"[WARN] S3 upload (plot) failed: {e}")
+
         
 class PriorTrainer(BaseTrainer):
     def __init__(self, **kwargs):

@@ -357,6 +357,36 @@ from torchvision import transforms
 from typing import Tuple
 from dalle2.models.clip_encoding import CLIPEncoder
 from dalle2.sampling.noise_scheduler import NoiseScheduler
+import io
+import boto3
+from urllib.parse import urlparse
+from pathlib import Path
+
+def is_s3_uri(p: str) -> bool:
+    return isinstance(p, str) and p.startswith("s3://")
+
+def split_s3_uri(uri: str):
+    pr = urlparse(uri)
+    return pr.netloc, pr.path.lstrip('/')  # bucket, key
+
+class S3Cache:
+    """Downloads S3 objects to a local cache and returns the local path."""
+    def __init__(self, cache_dir: str = "/tmp/dalle2_cache"):
+        self.cache_dir = Path(cache_dir)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.s3 = boto3.client("s3")
+
+    def get_local_path(self, bucket: str, key: str) -> str:
+        local_path = self.cache_dir / bucket / key
+        if not local_path.exists():
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+            self.s3.download_file(bucket, key, str(local_path))
+        return str(local_path)
+
+    def get_csv_as_local(self, bucket: str, key: str) -> str:
+        # same as get_local_path, but explicit name for clarity
+        return self.get_local_path(bucket, key)
+
 
 
 def _resolve_path(p: str, images_dir: str) -> str:
@@ -369,12 +399,6 @@ def _resolve_path(p: str, images_dir: str) -> str:
 
 
 class MidJourneyPriorDataset(Dataset):
-    """
-    Drop-in replacement for COCOPriorDataset.
-
-    CSV schema expected (created by your prepare script):
-        caption,image_path[,grid_id,tile,original_url]
-    """
     def __init__(
         self,
         metadata_path: str,
@@ -384,7 +408,8 @@ class MidJourneyPriorDataset(Dataset):
         noise_scheduler: NoiseScheduler,
         resize_size: int = 128,
         n_repeat: int = 1,
-        seed: int = 42
+        seed: int = 42,
+        cache_dir: str = "/tmp/dalle2_cache",
     ):
         super().__init__()
         self.B = batch_size
@@ -392,10 +417,27 @@ class MidJourneyPriorDataset(Dataset):
         self.noise_scheduler = noise_scheduler
         self.T = noise_scheduler.alpha_bar_t.shape[0]
         self.images_dir = images_dir
+        self.n_repeat = n_repeat
+        self.seed = seed
 
-        if not os.path.isfile(metadata_path):
-            raise FileNotFoundError(f'metadata.csv not found at {metadata_path}')
-        self.df = pd.read_csv(metadata_path)
+        # S3 setup
+        self.using_s3 = is_s3_uri(images_dir)
+        self.s3_cache = S3Cache(cache_dir) if self.using_s3 or is_s3_uri(metadata_path) else None
+        self.s3_bucket = None
+        self.s3_prefix = None
+        if self.using_s3:
+            self.s3_bucket, prefix = split_s3_uri(images_dir)
+            self.s3_prefix = prefix.rstrip('/')
+
+        # Load metadata (supports S3)
+        if is_s3_uri(metadata_path):
+            bucket, key = split_s3_uri(metadata_path)
+            local_csv = self.s3_cache.get_csv_as_local(bucket, key)
+            self.df = pd.read_csv(local_csv)
+        else:
+            if not os.path.isfile(metadata_path):
+                raise FileNotFoundError(f'metadata.csv not found at {metadata_path}')
+            self.df = pd.read_csv(metadata_path)
 
         self.transform = transforms.Compose([
             transforms.Resize((resize_size, resize_size), antialias=True),
@@ -404,23 +446,29 @@ class MidJourneyPriorDataset(Dataset):
         ])
 
         self.clip_encoder = CLIPEncoder().to(device).eval()
-
-        self.n_repeat = n_repeat
-        self.seed = seed
         self.total_len = len(self.df) * n_repeat
 
     def __len__(self):
         return self.total_len
+
+    def _resolve_img_path(self, img_path_csv: str) -> str:
+        if self.using_s3:
+            # Use basename of CSV path and prepend images_dir prefix
+            fname = os.path.basename(img_path_csv)
+            key = f"{self.s3_prefix}/{fname}" if self.s3_prefix else fname
+            return self.s3_cache.get_local_path(self.s3_bucket, key)
+        else:
+            # Local filesystem: if CSV has absolute path, use it; else join with images_dir
+            if os.path.isabs(img_path_csv):
+                return img_path_csv
+            return os.path.join(self.images_dir, os.path.basename(img_path_csv))
 
     def __getitem__(self, idx):
         row_idx = idx % len(self.df)
         row = self.df.iloc[row_idx]
         caption = row['caption']
         img_path_csv = str(row['image_path'])
-        img_path = _resolve_path(img_path_csv, self.images_dir)
-
-        if not os.path.isfile(img_path):
-            raise FileNotFoundError(f'Image not found at {img_path}')
+        img_path = self._resolve_img_path(img_path_csv)
 
         image = Image.open(img_path).convert('RGB')
         image_tensor = self.transform(image).unsqueeze(0).to(self.device)
@@ -429,7 +477,6 @@ class MidJourneyPriorDataset(Dataset):
             z_img = self.clip_encoder.encode_image(image_tensor).squeeze(0).to(self.device)
             z_txt = self.clip_encoder.encode_text([caption]).squeeze(0).to(self.device)
 
-        # Deterministic t/eps tied to idx
         g = torch.Generator(device=self.device).manual_seed(self.seed + idx)
         t = torch.randint(0, self.T, (1,), generator=g, device=self.device)
         eps = torch.randn(1, z_img.shape[0], generator=g, device=self.device)
@@ -449,7 +496,7 @@ class MidJourneyPriorDataset(Dataset):
         row = self.df.iloc[idx]
         caption = row['caption']
         img_path_csv = str(row['image_path'])
-        img_path = _resolve_path(img_path_csv, self.images_dir)
+        img_path = self._resolve_img_path(img_path_csv)
 
         image = Image.open(img_path).convert('RGB')
         image_tensor = self.transform(image).unsqueeze(0).to(self.device)
@@ -460,14 +507,7 @@ class MidJourneyPriorDataset(Dataset):
 
         return z_txt, z_img
 
-
 class MidJourneyDecoderDataset(Dataset):
-    """
-    Drop-in replacement for COCODecoderDataset.
-
-    CSV schema expected (created by your prepare script):
-        caption,image_path[,grid_id,tile,original_url]
-    """
     def __init__(
         self,
         metadata_path: str,
@@ -475,16 +515,31 @@ class MidJourneyDecoderDataset(Dataset):
         device: torch.device,
         noise_scheduler: NoiseScheduler,
         resize_size: int = 64,
-        n_repeat: int = 1
+        n_repeat: int = 1,
+        cache_dir: str = "/tmp/dalle2_cache",
     ):
         super().__init__()
         self.device = device
         self.noise_scheduler = noise_scheduler
         self.images_dir = images_dir
 
-        if not os.path.isfile(metadata_path):
-            raise FileNotFoundError(f'metadata.csv not found at {metadata_path}')
-        self.df = pd.read_csv(metadata_path)
+        self.using_s3 = is_s3_uri(images_dir)
+        self.s3_cache = S3Cache(cache_dir) if self.using_s3 or is_s3_uri(metadata_path) else None
+        self.s3_bucket = None
+        self.s3_prefix = None
+        if self.using_s3:
+            self.s3_bucket, prefix = split_s3_uri(images_dir)
+            self.s3_prefix = prefix.rstrip('/')
+
+        # Load metadata
+        if is_s3_uri(metadata_path):
+            bucket, key = split_s3_uri(metadata_path)
+            local_csv = self.s3_cache.get_csv_as_local(bucket, key)
+            self.df = pd.read_csv(local_csv)
+        else:
+            if not os.path.isfile(metadata_path):
+                raise FileNotFoundError(f'metadata.csv not found at {metadata_path}')
+            self.df = pd.read_csv(metadata_path)
 
         self.transform = transforms.Compose([
             transforms.Resize((resize_size, resize_size), antialias=True),
@@ -502,26 +557,31 @@ class MidJourneyDecoderDataset(Dataset):
     def __len__(self):
         return self.total_len
 
+    def _resolve_img_path(self, img_path_csv: str) -> str:
+        if self.using_s3:
+            fname = os.path.basename(img_path_csv)
+            key = f"{self.s3_prefix}/{fname}" if self.s3_prefix else fname
+            return self.s3_cache.get_local_path(self.s3_bucket, key)
+        else:
+            if os.path.isabs(img_path_csv):
+                return img_path_csv
+            return os.path.join(self.images_dir, os.path.basename(img_path_csv))
+
     def __getitem__(self, idx):
         row_idx = idx % len(self.df)
         row = self.df.iloc[row_idx]
-        img_path_csv = str(row['image_path'])
-        img_path = _resolve_path(img_path_csv, self.images_dir)
-
-        if not os.path.isfile(img_path):
-            raise FileNotFoundError(f'Image not found at {img_path}')
+        img_path = self._resolve_img_path(str(row['image_path']))
 
         image = Image.open(img_path).convert('RGB')
-        image_tensor = self.transform(image).unsqueeze(0).to(self.device) # (1, 3, H, W)
+        image_tensor = self.transform(image).unsqueeze(0).to(self.device)  # (1, 3, H, W)
 
         with torch.no_grad():
-            z_img = self.clip_encoder.encode_image(image_tensor).to(self.device) # (1, 512)
+            z_img = self.clip_encoder.encode_image(image_tensor).to(self.device)  # (1, 512)
             z_img = z_img / z_img.norm(dim=-1, keepdim=True)
 
         t = torch.randint(0, self.T, (1,), device=self.device).long()
         x_t, eps_img = self.noise_scheduler.add_noise(image_tensor, t)
 
-        # Sanity check
         a_bar = self.noise_scheduler.get_alpha_bar(t).view(-1, 1, 1, 1)
         x_t_re = a_bar.sqrt() * image_tensor + (1 - a_bar).sqrt() * eps_img
         assert torch.allclose(x_t, x_t_re, atol=1e-6), 'Mismatch between x_t and eps_img!'
@@ -536,8 +596,7 @@ class MidJourneyDecoderDataset(Dataset):
     def get_random_clean_image_and_embedding(self):
         idx = random.randint(0, len(self.df) - 1)
         row = self.df.iloc[idx]
-        img_path_csv = str(row['image_path'])
-        img_path = _resolve_path(img_path_csv, self.images_dir)
+        img_path = self._resolve_img_path(str(row['image_path']))
 
         image = Image.open(img_path).convert('RGB')
         image_tensor = self.transform(image).unsqueeze(0).to(self.device)
