@@ -71,6 +71,7 @@ class PriorDDIMSampler:
         self,
         noise_scheduler: NoiseScheduler,
         num_inference_steps: int,
+        device = 'mps',
         eta: float = 0.0,
     ) -> None:
         self.scheduler = noise_scheduler
@@ -146,6 +147,7 @@ class DecoderDDIMSampler:
         noise_scheduler: NoiseScheduler,
         num_inference_steps: int,
         eta: float = 0.0,
+        guidance_scale: float = 1.0,
         renorm_each_step: bool = False,
     ) -> None:
         self.scheduler = noise_scheduler
@@ -153,6 +155,7 @@ class DecoderDDIMSampler:
         self.eta = float(eta)
         self.renorm_each_step = renorm_each_step
         self.timesteps = _make_timesteps(len(noise_scheduler.alpha_bar_t), num_inference_steps, noise_scheduler.alpha_bar_t.device)
+        self.guidance_scale = guidance_scale
 
     def _predict_x0(
             self,
@@ -211,9 +214,12 @@ class DecoderDDIMSampler:
         for i, t_i in enumerate(self.timesteps):
             t = torch.full((B,), t_i, dtype=torch.long, device=device)
 
-            eps = model(x_t=x_t, z_img=z_img, t=t)
+            eps_cond = model(x_t=x_t, z_img=z_img, t=t)
+            eps_uncond = model(x_t=x_t, z_img=torch.zeros_like(z_img), t=t)
+            eps = eps_uncond + self.guidance_scale * (eps_cond - eps_uncond)
             
             x0 = self._predict_x0(x_t, eps, t)
+            
 
             if i == len(self.timesteps) - 1:
                 return x0.clamp(-1, 1)

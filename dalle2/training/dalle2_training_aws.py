@@ -37,12 +37,43 @@ from tqdm import tqdm
 import csv
 import boto3
 import tempfile
+import math
 
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-import copy
+
+def cosine_lr(step: int, total_steps: int, lr_max: float, lr_min: float, warmup_steps: int = 0) -> float:
+    if step < warmup_steps:
+        return lr_max * (step + 1) / max(1, warmup_steps)
+    t = step - warmup_steps
+    T = max(1, total_steps - warmup_steps)
+    return lr_min + 0.5 * (lr_max - lr_min) * (1.0 + math.cos(math.pi * t / T))
+
+
+def maybe_ablate_cond(z_img: torch.Tensor,
+                      t_emb: torch.Tensor,
+                      ablate_zero: bool = False,
+                      ablate_shuffle: bool = False):
+    """
+    Quickly probe whether conditioning matters.
+    ablate_zero    : z_img, t_emb -> 0
+    ablate_shuffle : z_img, t_emb are shuffled across batch
+    """
+    if ablate_zero:
+        z_img = torch.zeros_like(z_img)
+        t_emb = torch.zeros_like(t_emb)
+        return z_img, t_emb
+
+    if ablate_shuffle:
+        perm = torch.randperm(z_img.size(0), device=z_img.device)
+        z_img = z_img[perm]
+        t_emb = t_emb[perm]
+        return z_img, t_emb
+
+    return z_img, t_emb
+
 
 
 class BaseTrainer(ABC):
@@ -78,6 +109,13 @@ class BaseTrainer(ABC):
         self.model_save_name = model_save_name
         self.on_aws = on_aws
         self.debug = debug
+        self.use_cosine_lr = True
+        self.lr_max = 1e-4
+        self.lr_min = 2e-5
+        self.warmup_frac = 0.05
+#        self.steps_per_epoch = len(self.dataloader)
+        self.total_steps = 0  # to be initialized later
+
         
         # Create PyTorch DataLoader
         num_workers = min(4, os.cpu_count() or 1)
@@ -90,6 +128,7 @@ class BaseTrainer(ABC):
             num_workers=0
         )
 
+        self.steps_per_epoch = len(self.dataloader)
         # Assign device, ideally using a GPU-accelerated framework
         self.device = (
             'cuda' if torch.cuda.is_available()
@@ -108,25 +147,22 @@ class BaseTrainer(ABC):
             print(f'Device: {self.device}')
             print(f'Number of training batches: {len(self.dataloader)}')
 
-        self.ema_model = copy.deepcopy(self.train_module)
-        for param in self.ema_model.parameters():
-            param.requires_grad = False
+        from copy import deepcopy
+
+        self.ema_model = deepcopy(self.train_module)
+        self.ema_decay = 0.999  # You can tune this
+        for p in self.ema_model.parameters():
+            p.requires_grad = False
+
 
     
     def _configure_for_aws(self) -> None:
         """
         Prepare S3 for artifact uploads.
         """
-        # self.outputs_bucket = 'dalle2-outputs'
-        # self.models_bucket = 'dalle2-models'
-        # self.s3 = boto3.client('s3')
-        pass
-
-    @staticmethod
-    @torch.no_grad()
-    def update_ema(model, ema_model, decay=0.999):
-        for param, ema_param in zip(model.parameters(), ema_model.parameters()):
-            ema_param.data.mul_(decay).add_(param.data, alpha=1 - decay)
+        self.outputs_bucket = 'dalle2-outputs'
+        self.models_bucket = 'dalle2-models'
+        self.s3 = boto3.client('s3')
 
 
     
@@ -136,25 +172,24 @@ class BaseTrainer(ABC):
         - Keys under {prior|decoder}/checkpoints/* go to the models bucket.
         - Everything else goes to the outputs bucket.
         """
-        return
-        # try:
-        #     if not self.on_aws:
-        #         return
+        try:
+            if not self.on_aws:
+                return
 
-        #     if not hasattr(self, "s3"):
-        #         self.s3 = boto3.client("s3")
+            if not hasattr(self, "s3"):
+                self.s3 = boto3.client("s3")
 
-        #     # Route by key
-        #     is_checkpoint = (
-        #         key.startswith("prior/checkpoints/")
-        #         or key.startswith("decoder/checkpoints/")
-        #         or key.endswith(".pth")
-        #     )
-        #     bucket = self.models_bucket if is_checkpoint else self.outputs_bucket
+            # Route by key
+            is_checkpoint = (
+                key.startswith("prior/checkpoints/")
+                or key.startswith("decoder/checkpoints/")
+                or key.endswith(".pth")
+            )
+            bucket = self.models_bucket if is_checkpoint else self.outputs_bucket
 
-        #     self.s3.upload_file(local_path, bucket, key)
-        # except Exception as e:
-        #     print(f"[WARN] S3 upload failed for key '{key}': {e}")
+            self.s3.upload_file(local_path, bucket, key)
+        except Exception as e:
+            print(f"[WARN] S3 upload failed for key '{key}': {e}")
 
 
 
@@ -210,50 +245,32 @@ class BaseTrainer(ABC):
     
     def _save_current_model(self, epoch: int, batch_i: int) -> None:
         fname = f'epoch{epoch}_batch{batch_i}.pth'
-        os.makedirs(f'dalle2/checkpoints/{self.module_type}', exist_ok=True)
-        save_path = f'dalle2/checkpoints/{self.module_type}/{fname}'
-        torch.save(self.train_module.state_dict(), save_path)
-        print(f"[LOCAL] Model checkpoint saved → {save_path}")
-        ema_save_path = save_path.replace('.pth', '_ema.pth')
-        torch.save(self.ema_model.state_dict(), ema_save_path)
-        print(f"[LOCAL] EMA model checkpoint saved → {ema_save_path}")
-
-        # fname = f'epoch{epoch}_batch{batch_i}.pth'
-        # if self.on_aws:
-        #     # save to a temp file then upload
-        #     import tempfile
-        #     with tempfile.TemporaryDirectory() as td:
-        #         local_path = os.path.join(td, fname)
-        #         torch.save(self.train_module.state_dict(), local_path)
-        #         key = f'{self.module_type}/checkpoints/{fname}'
-        #         self._s3_put(local_path, key)
-        # else:
-        #     os.makedirs(f'dalle2/checkpoints/{self.module_type}', exist_ok=True)
-        #     save_path = f'dalle2/checkpoints/{self.module_type}/{fname}'
-        #     torch.save(self.train_module.state_dict(), save_path)
+        if self.on_aws:
+            # save to a temp file then upload
+            import tempfile
+            with tempfile.TemporaryDirectory() as td:
+                local_path = os.path.join(td, fname)
+                torch.save(self.train_module.state_dict(), local_path)
+                key = f'{self.module_type}/checkpoints/{fname}'
+                self._s3_put(local_path, key)
+        else:
+            os.makedirs(f'dalle2/checkpoints/{self.module_type}', exist_ok=True)
+            save_path = f'dalle2/checkpoints/{self.module_type}/{fname}'
+            torch.save(self.train_module.state_dict(), save_path)
 
     def _save_final_model(self) -> None:
         fname = 'final_trained_model.pth'
-        os.makedirs(f'dalle2/checkpoints/{self.module_type}', exist_ok=True)
-        save_path = f'dalle2/checkpoints/{self.module_type}/{fname}'
-        torch.save(self.train_module.state_dict(), save_path)
-        print(f"[LOCAL] Final model saved → {save_path}")
-        ema_save_path = save_path.replace('.pth', '_ema.pth')
-        torch.save(self.ema_model.state_dict(), ema_save_path)
-        print(f"[LOCAL] EMA model checkpoint saved → {ema_save_path}")
-
-        # fname = 'final_trained_model.pth'
-        # if self.on_aws:
-        #     import tempfile
-        #     with tempfile.TemporaryDirectory() as td:
-        #         local_path = os.path.join(td, fname)
-        #         torch.save(self.train_module.state_dict(), local_path)
-        #         key = f'{self.module_type}/checkpoints/{fname}'
-        #         self._s3_put(local_path, key)
-        # else:
-        #     os.makedirs(f'dalle2/checkpoints/{self.module_type}', exist_ok=True)
-        #     save_path = f'dalle2/checkpoints/{self.module_type}/{fname}'
-        #     torch.save(self.train_module.state_dict(), save_path)
+        if self.on_aws:
+            import tempfile
+            with tempfile.TemporaryDirectory() as td:
+                local_path = os.path.join(td, fname)
+                torch.save(self.train_module.state_dict(), local_path)
+                key = f'{self.module_type}/checkpoints/{fname}'
+                self._s3_put(local_path, key)
+        else:
+            os.makedirs(f'dalle2/checkpoints/{self.module_type}', exist_ok=True)
+            save_path = f'dalle2/checkpoints/{self.module_type}/{fname}'
+            torch.save(self.train_module.state_dict(), save_path)
 
 
     def _upload_file(self, local_path: str, key: str):
@@ -291,18 +308,34 @@ class BaseTrainer(ABC):
         """
         # Internally switches PyTorch to training mode
         self.train_module.train()
+        
+        self.total_steps = num_epochs * self.steps_per_epoch
+        warmup_steps = int(self.warmup_frac * self.total_steps)
 
         # Optionally load model from checkpoint
-        if resume_checkpoint_name is not None:
+    #    if resume_checkpoint_name is not None:
+     #       checkpoint_path = os.path.join(
+      #          'dalle2', 'checkpoints', self.module_type, resume_checkpoint_name
+       #     )
+        #    if os.path.isfile(checkpoint_path):
+         #       print(f'Resuming from checkpoint: {checkpoint_path}')
+          #      checkpoint = torch.load(checkpoint_path, map_location=self.device)
+           #     self.train_module.load_state_dict(checkpoint)
+          #  else:
+           #     raise FileNotFoundError(f'No checkpoint found at: {checkpoint_path}')
+        if self.on_aws:
+            checkpoint_path = self._download_checkpoint_from_s3(resume_checkpoint_name)
+        else:
             checkpoint_path = os.path.join(
                 'dalle2', 'checkpoints', self.module_type, resume_checkpoint_name
             )
-            if os.path.isfile(checkpoint_path):
-                print(f'Resuming from checkpoint: {checkpoint_path}')
-                checkpoint = torch.load(checkpoint_path, map_location=self.device)
-                self.train_module.load_state_dict(checkpoint)
-            else:
-                raise FileNotFoundError(f'No checkpoint found at: {checkpoint_path}')
+
+        if os.path.isfile(checkpoint_path):
+            print(f'Resuming from checkpoint: {checkpoint_path}')
+            checkpoint = torch.load(checkpoint_path, map_location=self.device)
+            self.train_module.load_state_dict(checkpoint)
+        else:
+            raise FileNotFoundError(f'No checkpoint found at: {checkpoint_path}')
 
         # Training loop
         for epoch in range(num_epochs):
@@ -313,12 +346,12 @@ class BaseTrainer(ABC):
                 # Get batch data (different depending on the prior vs decoder) and pass to correct PyTorch device
                 if self.module_type == 'prior':
                     # Inputs
-                    z_txt = F.normalize(batch['z_txt'].to(self.device), dim=-1)
+                    z_txt = batch['z_txt'].to(self.device)
 
                     if not hasattr(self, "_null_txt"):
                         clip = CLIPEncoder().to(self.device).eval()
                         with torch.no_grad():
-                            self._null_txt = F.normalize(clip.encode_text([""]).to(self.device), dim=-1)
+                            self._null_txt = clip.encode_text([""]).to(self.device) # [1,512]
 
                     p_uncond = 0.2
                     if self.module_type == 'prior':
@@ -331,7 +364,6 @@ class BaseTrainer(ABC):
 
                     t = batch['t'].to(self.device)
                     z_img_noisy = batch['z_img_noisy'].to(self.device)
-                    z_img_noisy = F.normalize(z_img_noisy, dim=-1)
 
                     # Target (for computing loss)
                     eps_img = batch['eps_img'].to(self.device)
@@ -376,8 +408,12 @@ class BaseTrainer(ABC):
                         z_img,
                         t
                     )
-
+                z_img, t = self._abl(z_img, t, self.ABLATE_ZERO, self.ABLATE_SHUFFLE)
+               # t_emb = self.get_timestep_embedding(t)
+                batch_input = (x_t, z_img, t)
                 eps_hat = self._run_batch(batch_input=batch_input)
+      #          z_img,t = self._abl(z_img,t,self.ABLATE_ZERO,self.ABLATE_SHUFFLE)
+     #           eps_hat = self.train_module(x_t, t, t, z_img)
 
                 # Compute loss between predicted and true noise
                 loss = self._compute_batch_loss(
@@ -385,15 +421,62 @@ class BaseTrainer(ABC):
                     predicted=eps_hat
                 )
 
+
+                cos_eps = F.cosine_similarity(
+                    eps_hat.flatten(1), eps_img.flatten(1), dim=1
+                ).mean().item()
+
+                if batch_i % 25 == 0:
+                    print(f"[cos_eps] {cos_eps:.4f}")
+
+
+                # Debug: log stats every 100 batches
+                if (batch_i + 1) % 25 == 0:
+                    print(f"[Epoch {epoch + 1}, Batch {batch_i + 1}] Loss: {loss.item():.6f}")
+                    print(f"  x_t:     mean={x_t.mean().item():.4f}, std={x_t.std().item():.4f}")
+                    print(f"  eps_img: mean={eps_img.mean().item():.4f}, std={eps_img.std().item():.4f}")
+                    print(f"  pred:    mean={eps_hat.mean().item():.4f}, std={eps_hat.std().item():.4f}")
+
                 epoch_loss += loss.item()
 
                 # Clear previous batch gradients, compute current batch gradients, and update weights
                 self.optimizer.zero_grad()
                 loss.backward()
+        
+                global_step = epoch * self.steps_per_epoch + batch_i
+                if self.use_cosine_lr:
+                    lr = cosine_lr(
+                        step=global_step,
+                        total_steps=self.total_steps,
+                        lr_max=self.lr_max,
+                        lr_min=self.lr_min,
+                        warmup_steps=warmup_steps
+                    )
+                    for pg in self.optimizer.param_groups:
+                        pg['lr'] = lr
+
+
                 self.optimizer.step()
+           
+                with torch.no_grad():
+                    for ema_p, p in zip(self.ema_model.parameters(), self.train_module.parameters()):
+                        ema_p.data.mul_(self.ema_decay).add_(p.data, alpha=1.0 - self.ema_decay)
 
-                self.update_ema(self.train_module, self.ema_model)
 
+                if loss.item() < 1e-3:
+                    fname = f"epoch{epoch+1}_batch{batch_i+1}_goodloss.pth"
+                    print(f"[INFO] 🎉 Loss {loss.item():.6f} < 1e32 — saving checkpoint: {fname}")
+                    self._run_intermediate_decoder_preview(epoch + 1, batch_i + 1, loss, steps=50, n_img=3)
+                    if self.on_aws:
+                        with tempfile.TemporaryDirectory() as td:
+                            local_path = os.path.join(td, fname)
+                            torch.save(self.train_module.state_dict(), local_path)
+                            key = f"{self.module_type}/checkpoints/{fname}"
+                            self._s3_put(local_path, key)
+                    else:
+                        os.makedirs(f'dalle2/checkpoints/{self.module_type}', exist_ok=True)
+                        save_path = f'dalle2/checkpoints/{self.module_type}/{fname}'
+                        torch.save(self.train_module.state_dict(), save_path)
                 # Save intermediate outputs
                 self._log_loss(epoch + 1, batch_i + 1, loss, plot_interval=save_intermediate_output)
 
@@ -410,6 +493,25 @@ class BaseTrainer(ABC):
             self._save_current_model(epoch + 1, batch_i + 1)
 
         self._save_final_model()
+
+
+    def _download_checkpoint_from_s3(self, checkpoint_name: str) -> str:
+        """
+        Downloads a checkpoint from S3 to a temp local path and returns the local path.
+        """
+        if not hasattr(self, "s3"):
+            self.s3 = boto3.client("s3")
+
+        key = f"{self.module_type}/checkpoints/{checkpoint_name}"
+        local_dir = tempfile.mkdtemp()
+        local_path = os.path.join(local_dir, checkpoint_name)
+
+        try:
+            self.s3.download_file(self.models_bucket, key, local_path)
+            return local_path
+        except Exception as e:
+            raise FileNotFoundError(f"[ERROR] Failed to download checkpoint {key} from S3: {e}")
+
 
     def _run_intermediate_decoder_preview(
             self,
@@ -435,7 +537,16 @@ class BaseTrainer(ABC):
         for i in range(n_img):
             img_true, z_img = self.dataloader.dataset.get_random_clean_image_and_embedding()
 
-            sampler = DecoderDDIMSampler(self.noise_scheduler, num_inference_steps=steps)
+#            t = torch.tensor([self.noise_scheduler.T - 1], device=z_img.device)
+            t = torch.tensor([len(self.noise_scheduler.beta_t) - 1], device=z_img.device)
+
+            from dalle2.utils.embeddings import get_timestep_embedding
+            t_emb = get_timestep_embedding(t)
+
+            # Inject ablation if needed
+            z_img, t_emb = self._abl(z_img, t_emb, self.ABLATE_ZERO, self.ABLATE_SHUFFLE)
+
+            sampler = DecoderDDIMSampler(self.noise_scheduler, num_inference_steps=steps, guidance_scale=5)
 
             self.train_module.eval()
             with torch.no_grad():
@@ -461,32 +572,23 @@ class BaseTrainer(ABC):
             ax[1, i].imshow(img_gen)
             ax[1, i].axis('off')
             ax[1, i].set_title('generated')
-            
+
+        # Create directory if needed
         output_dir = 'dalle2/checkpoints/decoder_intermediate_outputs'
         os.makedirs(output_dir, exist_ok=True)
+
+        # Save figure
+        plt.suptitle(f'Epoch: {epoch}, Batch: {batch}, Loss: {loss:.6f}')
         save_path = os.path.join(output_dir, f'epoch_{epoch}_batch_{batch}_output.png')
         plt.savefig(save_path, bbox_inches='tight', pad_inches=0.1)
         plt.close()
-        print(f"[LOCAL] Preview saved → {save_path}")
+
+        # NEW: upload to S3
+        if self.on_aws:
+            key = f"decoder/intermediate_outputs/epoch_{epoch}_batch_{batch}_output.png"
+            self._s3_put(save_path, key)
 
         self.train_module.train()
-
-        # Create directory if needed
-        # output_dir = 'dalle2/checkpoints/decoder_intermediate_outputs'
-        # os.makedirs(output_dir, exist_ok=True)
-
-        # # Save figure
-        # plt.suptitle(f'Epoch: {epoch}, Batch: {batch}, Loss: {loss:.6f}')
-        # save_path = os.path.join(output_dir, f'epoch_{epoch}_batch_{batch}_output.png')
-        # plt.savefig(save_path, bbox_inches='tight', pad_inches=0.1)
-        # plt.close()
-
-        # # NEW: upload to S3
-        # if self.on_aws:
-        #     key = f"decoder/intermediate_outputs/epoch_{epoch}_batch_{batch}_output.png"
-        #     self._s3_put(save_path, key)
-
-        # self.train_module.train()
 
     
     def save_intermediate_prior_cosine(
@@ -704,10 +806,18 @@ class PriorTrainer(BaseTrainer):
 class DecoderTrainer(BaseTrainer):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-
+    #    ABLATE_ZERO=False; ABLATE_SHUFFLE=False
     @property
     def module_type(self) -> str:
         return 'decoder'
+
+    ABLATE_ZERO=False; ABLATE_SHUFFLE=False
+    @staticmethod
+    def _abl(z,t,zero,shuf):
+        if zero:  return torch.zeros_like(z), torch.zeros_like(t)
+        if shuf:  p=torch.randperm(z.size(0),device=z.device); return z[p],t[p]
+        return z,t
+
 
     def _run_batch(
             self,

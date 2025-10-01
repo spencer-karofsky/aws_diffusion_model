@@ -61,4 +61,5 @@ if __name__ == '__main__':
         num_epochs=10,
         save_intermediate_output=50,
         save_intermediate_model=200,
+       # resume_checkpoint_name='dalle2/checkpoints/prior/epoch5_batch625.pth'
     )

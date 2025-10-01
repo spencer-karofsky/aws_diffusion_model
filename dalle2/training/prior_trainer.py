@@ -19,7 +19,7 @@ device = (
 )
 
 prior_model = Prior(device=device, T=200)
-optimizer = optim.AdamW(prior_model.parameters(), lr=1e-4)
+optimizer = optim.AdamW(prior_model.parameters(), lr=2e-4)
 noise_scheduler = NoiseScheduler(T=200, schedule_type='cosine')
 
 # Start conservatively; raise once it runs stably.
@@ -50,12 +50,13 @@ trainer = PriorTrainer(
     model_save_name='prior_model_overfit',
     debug=False,
     shuffle=False,
-    on_aws=True
+    on_aws=False
 )
 
 if __name__ == '__main__':
     trainer.train(
         num_epochs=10,
         save_intermediate_output=5,
-        save_intermediate_model=200,
+        save_intermediate_model=100,
+        resume_checkpoint_name='epoch3_batch100_ema.pth'
     )
