@@ -10,7 +10,7 @@ from dalle2.sampling.noise_scheduler import NoiseScheduler
 from dalle2.training.dalle2_training import PriorTrainer
 from dalle2.data.dataset_utils_2 import MidJourneyPriorDataset
 
-TARGET_IMG_SIZE = 128
+TARGET_IMG_SIZE = 64
 
 device = (
     'cuda' if torch.cuda.is_available()

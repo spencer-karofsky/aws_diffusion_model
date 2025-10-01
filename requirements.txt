@@ -1,0 +1,6 @@
+torch
+torchvision
+matplotlib
+open-clip-torch==0.2.1
+boto3
+pandas

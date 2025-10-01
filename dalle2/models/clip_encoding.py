@@ -32,7 +32,7 @@ class CLIPEncoder(nn.Module):
     def __init__(
             self,
             model_name: str = "ViT-B-32",
-            pretrained: str = "laion2b_s34b_b79k",
+            pretrained: str = "openai",
             device: Union[str, torch.device] = None
     ):
         """
@@ -64,7 +64,7 @@ class CLIPEncoder(nn.Module):
         self.model, _, self.preprocess = open_clip.create_model_and_transforms(
             model_name, pretrained=pretrained
         )
-        self.tokenizer = open_clip.get_tokenizer(model_name)
+        self.tokenizer = open_clip.tokenizer.tokenize
         self.model.to(self.device).eval()
     
     def encode_text_tokens(

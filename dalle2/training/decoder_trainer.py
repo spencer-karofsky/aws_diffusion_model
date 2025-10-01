@@ -1,6 +1,13 @@
 """
 decoder_trainer.py: trains the decoder model on a single image (for overfitting test).
 """
+import sys
+from pathlib import Path
+
+# Add project root to path
+project_root = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(project_root))
+
 import os
 import torch
 import torch.optim as optim
@@ -18,8 +25,8 @@ device = (
 )
 
 # Constants
-TARGET_IMG_SIZE = 128
-BATCH_SIZE = 64
+TARGET_IMG_SIZE = 64
+BATCH_SIZE = 128
 REPEATS = 1  # keep at 1 for the quick test
 
 # Model, optimizer, scheduler
@@ -28,8 +35,11 @@ optimizer = optim.AdamW(decoder_model.parameters(), lr=1e-4)
 noise_scheduler = NoiseScheduler(T=200, schedule_type='cosine')
 
 # --- S3 paths (use S3 URI scheme) ---
-metadata_path = "s3://dalle2-data/train_img/metadata.csv"
-images_dir = "s3://dalle2-data/train_img"
+# metadata_path = "s3://dalle2-data/train_img/metadata.csv"
+# images_dir = "s3://dalle2-data/train_img"
+
+metadata_path = 'dalle2/data/local_datasets/midjourney_v6/metadata.csv'
+images_dir = 'dalle2/data/local_datasets/midjourney_v6/images'
 
 # Dataset
 dataset = MidJourneyDecoderDataset(
@@ -53,7 +63,7 @@ trainer = DecoderTrainer(
     model_save_name='decoder_model_overfit',
     debug=False,
     shuffle=True,
-    on_aws=True
+    on_aws=False
 )
 
 if __name__ == '__main__':
