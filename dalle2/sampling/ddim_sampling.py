@@ -203,24 +203,23 @@ class DecoderDDIMSampler:
         H, W = image_size
         x_t = torch.randn(B, 3, H, W, device=device)
 
-        for i, t_i in enumerate(self.timesteps):
-            t = torch.full((B,), t_i, dtype=torch.long, device=device)
-
-            if self.guidance_scale == 1.0:
-                eps = model(x_t=x_t, z_img=z_img, t=t)
-            else:
-                eps_cond = model(x_t=x_t, z_img=z_img, t=t)
-                eps_uncond = model(x_t=x_t, z_img=torch.zeros_like(z_img), t=t)
-                eps = eps_uncond + self.guidance_scale * (eps_cond - eps_uncond)
+        # Create reverse timestep schedule
+        timesteps = torch.linspace(self.num_inference_steps - 1, 0, self.num_inference_steps, device=device).long()
+        timesteps = (timesteps * (len(self.scheduler.alpha_bar_t) / self.num_inference_steps)).long()
+        
+        for i in range(len(timesteps) - 1):
+            t = torch.full((B,), timesteps[i], dtype=torch.long, device=device)
+            t_next = torch.full((B,), timesteps[i + 1], dtype=torch.long, device=device)
             
-            x0 = self._predict_x0(x_t, eps, t)
-            x0 = x0.clamp(-1, 1)  # Clamp x0 prediction
-
-            if i == len(self.timesteps) - 1:
-                return x0
-
-            t_next = torch.full((B,), self.timesteps[i + 1], dtype=torch.long, device=device)
-            x_t = self._ddim_step(x0, eps, t, t_next)
-            x_t = x_t.clamp(-3, 3)  # Also clamp x_t to prevent runaway
+            eps = model(x_t=x_t, z_img=z_img, t=t)
             
+            alpha_t = self.scheduler.alpha_bar_t[timesteps[i]]
+            alpha_t_next = self.scheduler.alpha_bar_t[timesteps[i + 1]]
+            
+            # Direct DDIM formula
+            x_t = (
+                torch.sqrt(alpha_t_next / alpha_t) * x_t +
+                (torch.sqrt(1 - alpha_t_next) - torch.sqrt(alpha_t_next * (1 - alpha_t) / alpha_t)) * eps
+            )
+        
         return x_t.clamp(-1, 1)
