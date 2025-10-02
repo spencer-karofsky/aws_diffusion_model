@@ -311,6 +311,7 @@ class MidJourneyDecoderDataset(Dataset):
         resize_size: int = 64,
         n_repeat: int = 1,
         cache_dir: str = "/tmp/dalle2_cache",
+        precomputed_embeddings_path: str = None,
     ):
         super().__init__()
         self.device = device
@@ -334,7 +335,15 @@ class MidJourneyDecoderDataset(Dataset):
             if not os.path.isfile(metadata_path):
                 raise FileNotFoundError(f'metadata.csv not found at {metadata_path}')
             self.df = pd.read_csv(metadata_path)
-
+        if precomputed_embeddings_path:
+            embedding_data = torch.load(precomputed_embeddings_path)
+            self.precomputed_embeddings = embedding_data['embeddings']
+            self.use_precomputed = True
+            print(f"[Dataset] Loaded {len(self.precomputed_embeddings)} pre-computed CLIP embeddings")
+        else:
+            self.clip_encoder = CLIPEncoder().to(device).eval()
+            self.use_precomputed = False
+      
         self.transform = transforms.Compose([
             transforms.Resize((resize_size, resize_size), antialias=True),
             transforms.ToTensor(),
@@ -367,12 +376,18 @@ class MidJourneyDecoderDataset(Dataset):
         img_path = self._resolve_img_path(str(row['image_path']))
 
         image = Image.open(img_path).convert('RGB')
-        image_tensor = self.transform(image).unsqueeze(0).to(self.device)  # (1, 3, H, W)
+        image_tensor = self.transform(image).unsqueeze(0).to(self.device) # (1, 3, H, W)
 
-        with torch.no_grad():
-            z_img = self.clip_encoder.encode_image(image_tensor).to(self.device)  # (1, 512)
-            z_img = z_img / z_img.norm(dim=-1, keepdim=True)
-
+#        with torch.no_grad():
+ #           z_img = self.clip_encoder.encode_image(image_tensor).to(self.device)  # (1, 512)
+  #          z_img = z_img / z_img.norm(dim=-1, keepdim=True)
+        # Use pre-computed embeddings or encode on-the-fly
+        if self.use_precomputed:
+            z_img = self.precomputed_embeddings[row_idx].to(self.device).unsqueeze(0)  # (1, 512)
+        else:
+            with torch.no_grad():
+               z_img = self.clip_encoder.encode_image(image_tensor).to(self.device)
+               z_img = z_img / z_img.norm(dim=-1, keepdim=True)
         t = torch.randint(0, self.T, (1,), device=self.device).long()
         x_t, eps_img = self.noise_scheduler.add_noise(image_tensor, t)
 

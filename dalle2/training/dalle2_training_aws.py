@@ -129,7 +129,7 @@ class BaseTrainer(ABC):
             dataset,
             batch_size=batch_size,
             shuffle=shuffle,
-            # num_workers=num_workers
+            # num_workers=4
             num_workers=0
         )
 
@@ -493,7 +493,7 @@ class BaseTrainer(ABC):
                 self._log_loss(epoch + 1, batch_i + 1, loss, plot_interval=save_intermediate_output)
 
                 if (batch_i + 1) % save_intermediate_output == 0 and self.module_type == 'decoder':
-                    self._run_intermediate_decoder_preview(epoch + 1, batch_i + 1, loss, steps=50, n_img=3)
+                    self._run_intermediate_decoder_preview(epoch + 1, batch_i + 1, loss, steps=200, n_img=3)
                 
                 if (batch_i + 1) % save_intermediate_output == 0 and self.module_type == 'prior':
                     self.save_intermediate_prior_cosine(epoch + 1, batch_i + 1, loss, n_embs=1)
@@ -558,7 +558,7 @@ class BaseTrainer(ABC):
             # Inject ablation if needed
             z_img, t_emb = self._abl(z_img, t_emb, self.ABLATE_ZERO, self.ABLATE_SHUFFLE)
 
-            sampler = DecoderDDIMSampler(self.noise_scheduler, num_inference_steps=steps, guidance_scale=5)
+            sampler = DecoderDDIMSampler(self.noise_scheduler, num_inference_steps=steps, guidance_scale=1.0)
 
             self.train_module.eval()
             with torch.no_grad():
