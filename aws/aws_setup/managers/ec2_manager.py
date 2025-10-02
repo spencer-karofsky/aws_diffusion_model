@@ -1,8 +1,8 @@
 """
 Implements all EC2 functionalities.
 """
-from aws_setup.utils.logger import logger
-from aws_setup.interfaces.ec2_interface import EC2InstancesInterface, EC2KeyPairInterface, EC2VolumeInterface
+from aws.aws_setup.utils.logger import logger
+from aws.aws_setup.interfaces.ec2_interface import EC2InstancesInterface, EC2KeyPairInterface, EC2VolumeInterface
 from botocore.exceptions import ClientError
 from botocore.client import BaseClient
 from typing import List, Dict

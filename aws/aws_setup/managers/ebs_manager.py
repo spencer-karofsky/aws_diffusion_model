@@ -1,8 +1,8 @@
 """
 Implements all EBS functionalities.
 """
-from aws_setup.utils.logger import logger
-from aws_setup.interfaces.ebs_interface import EBSVolumeInterface
+from aws.aws_setup.utils.logger import logger
+from aws.aws_setup.interfaces.ebs_interface import EBSVolumeInterface
 from botocore.exceptions import ClientError
 from botocore.client import BaseClient
 from typing import List, Dict, Union

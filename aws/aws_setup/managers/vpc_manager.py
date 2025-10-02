@@ -1,8 +1,8 @@
 """
 Implements all VPC functionalities.
 """
-from aws_setup.utils.logger import logger
-from aws_setup.interfaces.vpc_interface import VPCSetupInterface, VPCNetworkInterface, VPCSecurityInterface
+from aws.aws_setup.utils.logger import logger
+from aws.aws_setup.interfaces.vpc_interface import VPCSetupInterface, VPCNetworkInterface, VPCSecurityInterface
 from botocore.exceptions import ClientError
 from botocore.client import BaseClient
 from typing import Optional, List

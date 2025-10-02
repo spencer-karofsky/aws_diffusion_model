@@ -14,12 +14,11 @@ import os
 import sys
 import boto3
 import json
-import sys
 from pathlib import Path
 
 # Add the project root to sys.path
-AWS_PATH = Path(__file__).resolve().parent.parent / 'aws'
-sys.path.append(str(AWS_PATH))
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
 
 
 from aws.aws_setup.managers.s3_manager import S3BucketManager

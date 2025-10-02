@@ -1,9 +1,9 @@
 """
 Implements IAM functionalities.
 """
-from aws_setup.utils.logger import logger
+from aws.aws_setup.utils.logger import logger
 from botocore.exceptions import ClientError
-from aws_setup.interfaces.iam_interface import IAMRoleInterface
+from aws.aws_setup.interfaces.iam_interface import IAMRoleInterface
 from botocore.client import BaseClient
 from typing import Optional
 

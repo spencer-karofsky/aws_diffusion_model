@@ -3,9 +3,9 @@ Implement all Lambda functionalities
 """
 from typing import List, Dict, Optional, Any
 from botocore.client import BaseClient
-from aws_setup.interfaces.lambda_interface import LambdaFunctionInterface, LambdaDeploymentInterface, LambdaInvocationInterface
+from aws.aws_setup.interfaces.lambda_interface import LambdaFunctionInterface, LambdaDeploymentInterface, LambdaInvocationInterface
 from botocore.exceptions import ClientError
-from aws_setup.utils.logger import logger
+from aws.aws_setup.utils.logger import logger
 import os
 import io
 import zipfile

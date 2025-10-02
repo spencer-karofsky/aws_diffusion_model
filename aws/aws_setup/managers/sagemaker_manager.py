@@ -1,9 +1,9 @@
 """
 Implements all SageMaker functionalities.
 """
-from aws_setup.utils.logger import logger
-from aws_setup.managers.s3_manager import S3ObjectManager
-from aws_setup.interfaces.sagemaker_interface import SageMakerNotebookInterface, SageMakerDataInterface, SageMakerTrainingInterface
+from aws.aws_setup.utils.logger import logger
+from aws.aws_setup.managers.s3_manager import S3ObjectManager
+from aws.aws_setup.interfaces.sagemaker_interface import SageMakerNotebookInterface, SageMakerDataInterface, SageMakerTrainingInterface
 from botocore.exceptions import ClientError
 from typing import Optional
 import os
