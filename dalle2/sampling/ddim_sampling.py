@@ -176,22 +176,21 @@ class DecoderDDIMSampler:
             t_cur: torch.Tensor,
             t_next: torch.Tensor
         ) -> torch.Tensor:
-        alpha_bar_cur = _extract_alpha_bar(self.scheduler, t_cur, x0.ndim)
         alpha_bar_next = _extract_alpha_bar(self.scheduler, t_next, x0.ndim)
-
+        
         if self.eta == 0.0:
+            # Deterministic DDIM: just go from x0 -> x_{t_next}
             sigma = 0.0
-            noise = 0.0
+            noise_term = 0.0
         else:
+            alpha_bar_cur = _extract_alpha_bar(self.scheduler, t_cur, x0.ndim)
             sigma = self.eta * torch.sqrt((1 - alpha_bar_next) / (1 - alpha_bar_cur) * (1 - alpha_bar_cur / alpha_bar_next))
-            noise = torch.randn_like(eps)
-
-        x_prev = (
-            torch.sqrt(alpha_bar_next) * x0 +
-            torch.sqrt(1 - alpha_bar_next - sigma ** 2) * eps +
-            sigma * noise
-        )
-        return x_prev
+            noise_term = sigma * torch.randn_like(x0)
+        
+        # Recompute the direction using x0
+        direction = torch.sqrt(1 - alpha_bar_next - sigma**2) * eps
+        
+        return torch.sqrt(alpha_bar_next) * x0 + direction + noise_term
 
     @torch.no_grad()
     def sample(
@@ -203,8 +202,6 @@ class DecoderDDIMSampler:
         B, device = z_img.size(0), z_img.device
         H, W = image_size
         x_t = torch.randn(B, 3, H, W, device=device)
-        
-        print(f"[DDIM] Starting with x_t: mean={x_t.mean():.4f}, std={x_t.std():.4f}")
 
         for i, t_i in enumerate(self.timesteps):
             t = torch.full((B,), t_i, dtype=torch.long, device=device)
@@ -217,15 +214,13 @@ class DecoderDDIMSampler:
                 eps = eps_uncond + self.guidance_scale * (eps_cond - eps_uncond)
             
             x0 = self._predict_x0(x_t, eps, t)
-            
-            if i % 10 == 0:  # Print every 10 steps
-                print(f"[DDIM] Step {i}, t={t_i}: x_t mean={x_t.mean():.4f}, x0 mean={x0.mean():.4f}, eps mean={eps.mean():.4f}")
+            x0 = x0.clamp(-1, 1)  # Clamp x0 prediction
 
             if i == len(self.timesteps) - 1:
-                print(f"[DDIM] Final x0: mean={x0.mean():.4f}, std={x0.std():.4f}, range=[{x0.min():.4f}, {x0.max():.4f}]")
-                return x0.clamp(-1, 1)
+                return x0
 
             t_next = torch.full((B,), self.timesteps[i + 1], dtype=torch.long, device=device)
             x_t = self._ddim_step(x0, eps, t, t_next)
+            x_t = x_t.clamp(-3, 3)  # Also clamp x_t to prevent runaway
             
         return x_t.clamp(-1, 1)
