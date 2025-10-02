@@ -415,3 +415,49 @@ class MidJourneyDecoderDataset(Dataset):
             z_img = z_img / z_img.norm(dim=-1, keepdim=True)
 
         return image_tensor, z_img
+    
+
+class SingleImageOverfitDataset(Dataset):
+    """Dataset that returns the same image repeatedly for overfitting tests."""
+    
+    def __init__(
+        self,
+        image_path: str,
+        z_img: torch.Tensor,
+        device: torch.device,
+        noise_scheduler: NoiseScheduler,
+        resize_size: int = 64,
+        steps_per_epoch: int = 500
+    ):
+        super().__init__()
+        self.device = device
+        self.noise_scheduler = noise_scheduler
+        self.T = len(noise_scheduler.alpha_bar_t)
+        self.steps_per_epoch = steps_per_epoch
+        
+        # Load and preprocess the single image
+        image = Image.open(image_path).convert('RGB')
+        self.transform = transforms.Compose([
+            transforms.Resize((resize_size, resize_size), antialias=True),
+            transforms.ToTensor(),
+            transforms.Lambda(lambda x: x * 2 - 1)
+        ])
+        self.image_tensor = self.transform(image).unsqueeze(0).to(device)
+        self.z_img = z_img.to(device)
+        
+    def __len__(self):
+        return self.steps_per_epoch
+    
+    def __getitem__(self, idx):
+        t = torch.randint(0, self.T, (1,), device=self.device).long()
+        x_t, eps_img = self.noise_scheduler.add_noise(self.image_tensor, t)
+        
+        return {
+            'x_t': x_t.squeeze(0),
+            'z_img': self.z_img.squeeze(0),
+            't': t.squeeze(0),
+            'eps_img': eps_img.squeeze(0)
+        }
+    
+    def get_random_clean_image_and_embedding(self):
+        return self.image_tensor, self.z_img.unsqueeze(0)

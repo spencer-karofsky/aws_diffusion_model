@@ -15,7 +15,7 @@ import torch.optim as optim
 from dalle2.models.decoder import Decoder
 from dalle2.sampling.noise_scheduler import NoiseScheduler
 from dalle2.training.dalle2_training_aws import DecoderTrainer
-from dalle2.data.dataset_utils_2 import MidJourneyDecoderDataset
+from dalle2.data.dataset_utils_2 import MidJourneyDecoderDataset, SingleImageOverfitDataset
 
 # Device
 device = (
@@ -26,8 +26,8 @@ device = (
 
 # Constants
 TARGET_IMG_SIZE = 64
-BATCH_SIZE = 256
-REPEATS = 1  # keep at 1 for the quick test
+BATCH_SIZE = 128
+REPEATS = 1
 
 # Model, optimizer, scheduler
 decoder_model = Decoder(device=device, debug=True, T=1000)
@@ -43,17 +43,31 @@ images_dir = "/home/ec2-user/data/train_img"
 # images_dir = 'dalle2/data/local_datasets/midjourney_v6/images'
 
 # Dataset
-dataset = MidJourneyDecoderDataset(
-    metadata_path=metadata_path,
-    images_dir=images_dir,
+# dataset = MidJourneyDecoderDataset(
+#     metadata_path=metadata_path,
+#     images_dir=images_dir,
+#     device=device,
+#     resize_size=TARGET_IMG_SIZE,
+#     noise_scheduler=noise_scheduler,
+#     n_repeat=REPEATS,
+#     # Optional: pick a larger persistent cache directory on the instance
+#     # cache_dir="/home/ec2-user/dalle2_cache",
+#     precomputed_embeddings_path='/home/ec2-user/data/precomputed_embeddings.pt'
+# )
+
+embedding_data = torch.load('/home/ec2-user/data/precomputed_embeddings.pt')
+z_img = embedding_data['embeddings'][0]
+image_path = f"/home/ec2-user/data/train_img/{embedding_data['image_paths'][0]}"
+
+dataset = SingleImageOverfitDataset(
+    image_path=image_path,
+    z_img=z_img,
     device=device,
-    resize_size=TARGET_IMG_SIZE,
     noise_scheduler=noise_scheduler,
-    n_repeat=REPEATS,
-    # Optional: pick a larger persistent cache directory on the instance
-    # cache_dir="/home/ec2-user/dalle2_cache",
-    precomputed_embeddings_path='/home/ec2-user/data/precomputed_embeddings.pt'
+    resize_size=TARGET_IMG_SIZE
 )
+
+BATCH_SIZE = 1
 
 # Trainer
 trainer = DecoderTrainer(
@@ -64,7 +78,7 @@ trainer = DecoderTrainer(
     batch_size=BATCH_SIZE,
     model_save_name='decoder_model_overfit',
     debug=False,
-    shuffle=True,
+    shuffle=False, # Change back later
     on_aws=True,
     use_amp=True
 )
@@ -72,7 +86,7 @@ trainer = DecoderTrainer(
 if __name__ == '__main__':
     trainer.train(
         num_epochs=30,
-        save_intermediate_output=10,
+        save_intermediate_output=25,
         save_intermediate_model=50,
-        resume_checkpoint_name='epoch11_batch157.pth'
+   #     resume_checkpoint_name='epoch11_batch157.pth'
     )
