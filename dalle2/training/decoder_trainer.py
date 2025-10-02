@@ -35,11 +35,11 @@ optimizer = optim.AdamW(decoder_model.parameters(), lr=1e-4)
 noise_scheduler = NoiseScheduler(T=200, schedule_type='cosine')
 
 # --- S3 paths (use S3 URI scheme) ---
-# metadata_path = "s3://dalle2-data/train_img/metadata.csv"
-# images_dir = "s3://dalle2-data/train_img"
+metadata_path = "s3://dalle2-data/train_img/metadata.csv"
+images_dir = "s3://dalle2-data/train_img"
 
-metadata_path = 'dalle2/data/local_datasets/midjourney_v6/metadata.csv'
-images_dir = 'dalle2/data/local_datasets/midjourney_v6/images'
+# metadata_path = 'dalle2/data/local_datasets/midjourney_v6/metadata.csv'
+# images_dir = 'dalle2/data/local_datasets/midjourney_v6/images'
 
 # Dataset
 dataset = MidJourneyDecoderDataset(
@@ -63,7 +63,7 @@ trainer = DecoderTrainer(
     model_save_name='decoder_model_overfit',
     debug=False,
     shuffle=True,
-    on_aws=False
+    on_aws=True
 )
 
 if __name__ == '__main__':
