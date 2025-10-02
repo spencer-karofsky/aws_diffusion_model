@@ -48,7 +48,7 @@ class Decoder(nn.Module):
     def __init__(
             self,
             device: torch.device,
-            T: int = 200,
+            T: int = 1000,
             num_inference_steps: int = 30,
             on_aws: bool = False,
             debug: bool = False 
