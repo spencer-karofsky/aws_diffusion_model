@@ -197,16 +197,6 @@ class DecoderDDIMSampler:
         z_img: torch.Tensor,
         image_size: Tuple[int, int] = (128, 128),
     ) -> torch.Tensor:
-        """Generate a batch of denoised images given CLIP image embeddings.
-
-        Args:
-            model: trained U-Net decoder
-            z_img: (B, 512) CLIP image embedding
-            image_size: (H,W) to generate
-
-        Returns:
-            Tensor of shape (B,3,H,W) in the range [-1,1]
-        """
         B, device = z_img.size(0), z_img.device
         H, W = image_size
         x_t = torch.randn(B, 3, H, W, device=device)
@@ -214,18 +204,18 @@ class DecoderDDIMSampler:
         for i, t_i in enumerate(self.timesteps):
             t = torch.full((B,), t_i, dtype=torch.long, device=device)
 
-            eps_cond = model(x_t=x_t, z_img=z_img, t=t)
-            eps_uncond = model(x_t=x_t, z_img=torch.zeros_like(z_img), t=t)
-            eps = eps_uncond + self.guidance_scale * (eps_cond - eps_uncond)
+            # Only use guidance if scale != 1.0 AND model was trained for it
+            if self.guidance_scale == 1.0:
+                eps = model(x_t=x_t, z_img=z_img, t=t)
+            else:
+                eps_cond = model(x_t=x_t, z_img=z_img, t=t)
+                eps_uncond = model(x_t=x_t, z_img=torch.zeros_like(z_img), t=t)
+                eps = eps_uncond + self.guidance_scale * (eps_cond - eps_uncond)
             
             x0 = self._predict_x0(x_t, eps, t)
-            
 
             if i == len(self.timesteps) - 1:
                 return x0.clamp(-1, 1)
 
             t_next = torch.full((B,), self.timesteps[i + 1], dtype=torch.long, device=device)
             x_t = self._ddim_step(x0, eps, t, t_next)
-
-            if self.renorm_each_step:
-                x_t = x_t / x_t.std(dim=(1, 2, 3), keepdim=True).clamp(min=1e-4)
