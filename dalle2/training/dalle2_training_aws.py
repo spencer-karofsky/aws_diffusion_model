@@ -328,19 +328,20 @@ class BaseTrainer(ABC):
            #     self.train_module.load_state_dict(checkpoint)
           #  else:
            #     raise FileNotFoundError(f'No checkpoint found at: {checkpoint_path}')
-        if self.on_aws:
-            checkpoint_path = self._download_checkpoint_from_s3(resume_checkpoint_name)
-        else:
-            checkpoint_path = os.path.join(
-                'dalle2', 'checkpoints', self.module_type, resume_checkpoint_name
-            )
+        if resume_checkpoint_name is not None:
+            if self.on_aws:
+                checkpoint_path = self._download_checkpoint_from_s3(resume_checkpoint_name)
+            else:
+                checkpoint_path = os.path.join(
+                    'dalle2', 'checkpoints', self.module_type, resume_checkpoint_name
+                )
 
-        if os.path.isfile(checkpoint_path):
-            print(f'Resuming from checkpoint: {checkpoint_path}')
-            checkpoint = torch.load(checkpoint_path, map_location=self.device)
-            self.train_module.load_state_dict(checkpoint)
-        else:
-            raise FileNotFoundError(f'No checkpoint found at: {checkpoint_path}')
+            if os.path.isfile(checkpoint_path):
+                print(f'Resuming from checkpoint: {checkpoint_path}')
+                checkpoint = torch.load(checkpoint_path, map_location=self.device)
+                self.train_module.load_state_dict(checkpoint)
+            else:
+                raise FileNotFoundError(f'No checkpoint found at: {checkpoint_path}')
 
         # Training loop
         for epoch in range(num_epochs):
