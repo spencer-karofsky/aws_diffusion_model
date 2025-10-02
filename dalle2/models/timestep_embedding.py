@@ -6,7 +6,7 @@ Description:
 
 Classes:
     * TimestepEmbedder(nn.Module): Sinusoidally-encodes a timestep vector, which is then passed through a Neural Network and outputs the Projected Timestep Embedding.
-    
+
 Author:
     * Spencer Karofsky (https://github.com/spencer-karofsky)
 """
@@ -19,10 +19,10 @@ import math
 
 class TimestepEmbedder(nn.Module):
     def __init__(
-            self,
-            dim: int,
-            module: str,
-            T: int = 200
+        self,
+        dim: int,
+        module: str,
+        T: int = 1000
     ):
         """
         Encodes the timestep into a learned embedding.
@@ -40,6 +40,7 @@ class TimestepEmbedder(nn.Module):
         """
         super().__init__()
         self.dim = dim
+        self.T = T  # Store T for normalization
 
         # Projection after sinusoidally-encoding
         if module == 'prior':
@@ -49,8 +50,6 @@ class TimestepEmbedder(nn.Module):
                 nn.Linear(dim * 4, dim),
                 nn.LayerNorm(dim)
             )
-            self.T = T
-
         elif module == 'decoder':
             self.mlp = nn.Sequential(
                 nn.Linear(dim, dim * 4),
@@ -60,10 +59,9 @@ class TimestepEmbedder(nn.Module):
         
         self.module = module
 
-
     def forward(
-            self,
-            timesteps: torch.Tensor
+        self,
+        timesteps: torch.Tensor
     ) -> torch.Tensor:
         """
         Forward pass of Timestep Embedder:
@@ -72,23 +70,20 @@ class TimestepEmbedder(nn.Module):
 
         Args:
             timesteps: the timesteps vector, of shape (B)
-        
+
         Returns:
             the sinusoidally-encoded and projected timesteps Tensor, of shape (B, self.dim)
         """
-        # return projected
         assert timesteps.dim() == 1
-        # scale by the SAME T used in training
-        if self.module == 'prior':
-            t = timesteps.float() / max(self.T - 1, 1)
-        else:
-            t = timesteps.float() / 999.0  # fixed constant for decoder (or whatever worked well in your tests)
-
+        
+        # Normalize by the actual T used in training
+        t = timesteps.float() / max(self.T - 1, 1)
         t = t.clamp_(1e-5, 1.0)
-
+        
         half = self.dim // 2
-        # standard sinusoid base
+        # Standard sinusoid base
         freqs = torch.exp(torch.arange(half, device=t.device) * -(math.log(10000.0) / (half - 1)))
         angles = t.unsqueeze(1) * freqs.unsqueeze(0)
         emb = torch.cat([angles.sin(), angles.cos()], dim=1)
+        
         return self.mlp(emb)
