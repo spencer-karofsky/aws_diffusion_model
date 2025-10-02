@@ -30,9 +30,9 @@ BATCH_SIZE = 256
 REPEATS = 1  # keep at 1 for the quick test
 
 # Model, optimizer, scheduler
-decoder_model = Decoder(device=device, debug=True, T=200)
+decoder_model = Decoder(device=device, debug=True, T=1000, img_size=64)
 optimizer = optim.AdamW(decoder_model.parameters(), lr=1e-4)
-noise_scheduler = NoiseScheduler(T=200, schedule_type='cosine')
+noise_scheduler = NoiseScheduler(T=1000, schedule_type='cosine')
 
 # --- S3 paths (use S3 URI scheme) ---
 # metadata_path = "s3://dalle2-data/train_img/metadata.csv"
