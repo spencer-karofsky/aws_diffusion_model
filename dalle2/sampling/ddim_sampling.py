@@ -210,6 +210,12 @@ class DecoderDDIMSampler:
             eps = model(x_t=x_t, z_img=z_img, t=t)
             x0 = self._predict_x0(x_t, eps, t)
 
+            if i % 10 == 0:
+                print(f"Step {i}/{len(self.timesteps)}, t={t_i.item()}")
+                print(f"  x_t: mean={x_t.mean().item():.4f}, std={x_t.std().item():.4f}")
+                print(f"  eps: mean={eps.mean().item():.4f}, std={eps.std().item():.4f}")
+                print(f"  x0:  mean={x0.mean().item():.4f}, std={x0.std().item():.4f}")
+
             if i == len(self.timesteps) - 1:
                 return x0.clamp(-1, 1)
 
