@@ -76,8 +76,11 @@ class TimestepEmbedder(nn.Module):
         """
         assert timesteps.dim() == 1
         
-        # Normalize by the actual T used in training
-        t = timesteps.float() / max(self.T - 1, 1)
+        # Use fixed normalization for decoder (like the old code)
+        if self.module == 'decoder':
+            t = timesteps.float() / 999.0
+        else:
+            t = timesteps.float() / max(self.T - 1, 1)
         t = t.clamp_(1e-5, 1.0)
         
         half = self.dim // 2
