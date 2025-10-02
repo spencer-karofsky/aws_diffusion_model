@@ -60,6 +60,11 @@ class NoiseScheduler:
         # Compute alpha_bar_t
         self.alpha_bar_t = torch.cumprod(self.alpha_t, dim=0).to(self.device)
 
+        print(f"[NoiseScheduler] T={T}, schedule={schedule_type}")
+        print(f"[NoiseScheduler] beta_t range: [{self.beta_t.min():.6f}, {self.beta_t.max():.6f}]")
+        print(f"[NoiseScheduler] alpha_bar_t range: [{self.alpha_bar_t.min():.6f}, {self.alpha_bar_t.max():.6f}]")
+        print(f"[NoiseScheduler] alpha_bar_t[0]={self.alpha_bar_t[0]:.6f}, alpha_bar_t[-1]={self.alpha_bar_t[-1]:.6f}")
+
     def _make_cosine_beta_schedule(
             self,
             T: int,

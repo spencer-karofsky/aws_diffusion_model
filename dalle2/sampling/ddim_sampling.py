@@ -49,6 +49,9 @@ def _make_timesteps(total_steps: int, num_inference_steps: int, device: torch.de
     if ts.numel() > num_inference_steps:
         ts = ts[:num_inference_steps]
 
+    print(f"[DEBUG] Timesteps for sampling: {ts}")
+    print(f"[DEBUG] Number of unique timesteps: {ts.numel()}")
+
     assert ts.numel() == num_inference_steps, "Timesteps calculation failed to produce the required length"
     return ts
 
