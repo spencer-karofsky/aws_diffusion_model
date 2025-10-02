@@ -453,7 +453,11 @@ class BaseTrainer(ABC):
 
                 # Clear previous batch gradients, compute current batch gradients, and update weights
                 self.optimizer.zero_grad()
-                loss.backward()
+
+                if self.use_amp:
+                    self.scaler.scale(loss).backward()
+                else:
+                    loss.backward()
         
                 global_step = epoch * self.steps_per_epoch + batch_i
                 if self.use_cosine_lr:
@@ -468,7 +472,11 @@ class BaseTrainer(ABC):
                         pg['lr'] = lr
 
 
-                self.optimizer.step()
+                if self.use_amp:
+                    self.scaler.step(self.optimizer)
+                    self.scaler.update()
+                else:
+                    self.optimizer.step()
            
                 with torch.no_grad():
                     for ema_p, p in zip(self.ema_model.parameters(), self.train_module.parameters()):
