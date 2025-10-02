@@ -48,7 +48,7 @@ class Decoder(nn.Module):
     def __init__(
             self,
             device: torch.device,
-            T: int = 1000,
+            T: int = 200,
             num_inference_steps: int = 30,
             on_aws: bool = False,
             debug: bool = False 
@@ -83,7 +83,7 @@ class Decoder(nn.Module):
         self.timestep_embedder = TimestepEmbedder(dim=self.TIMESTEP_DIM, module='decoder')
 
         # Define U-Net hyperparameters and instantiate the U-Net
-        self.IMG_SIZE = 128 # pixels
+        self.IMG_SIZE = 64 # pixels
         self.IN_CHANNELS = 3 # 3 color channels (RGB)
         self.COND_EMB_DIM = 512 # embedding dimensionality of the conditioning vector to inject into the U-Net
         self.BASE_CHANNELS = 64 # base channels in the first convolution layer
