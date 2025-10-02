@@ -198,7 +198,7 @@ class DecoderDDIMSampler:
         self,
         model: nn.Module,
         z_img: torch.Tensor,
-        image_size: Tuple[int, int] = (128, 128),
+        image_size: Tuple[int, int] = (64, 64),
     ) -> torch.Tensor:
         B, device = z_img.size(0), z_img.device
         H, W = image_size
