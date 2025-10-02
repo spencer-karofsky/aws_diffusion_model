@@ -376,24 +376,21 @@ class MidJourneyDecoderDataset(Dataset):
         img_path = self._resolve_img_path(str(row['image_path']))
 
         image = Image.open(img_path).convert('RGB')
-        image_tensor = self.transform(image).unsqueeze(0).to(self.device) # (1, 3, H, W)
+        image_tensor = self.transform(image).unsqueeze(0).to(self.device)  # (1, 3, H, W)
 
-#        with torch.no_grad():
- #           z_img = self.clip_encoder.encode_image(image_tensor).to(self.device)  # (1, 512)
-  #          z_img = z_img / z_img.norm(dim=-1, keepdim=True)
         # Use pre-computed embeddings or encode on-the-fly
         if self.use_precomputed:
-            z_img = self.precomputed_embeddings[row_idx].to(self.device).unsqueeze(0)  # (1, 512)
+            z_img = self.precomputed_embeddings[row_idx].to(self.device).unsqueeze(0)
         else:
             with torch.no_grad():
-               z_img = self.clip_encoder.encode_image(image_tensor).to(self.device)
-               z_img = z_img / z_img.norm(dim=-1, keepdim=True)
+                z_img = self.clip_encoder.encode_image(image_tensor).to(self.device)
+                z_img = z_img / z_img.norm(dim=-1, keepdim=True)
+        
         t = torch.randint(0, self.T, (1,), device=self.device).long()
-        x_t, eps_img = self.noise_scheduler.add_noise(image_tensor, t)
-
-        a_bar = self.noise_scheduler.get_alpha_bar(t).view(-1, 1, 1, 1)
-        x_t_re = a_bar.sqrt() * image_tensor + (1 - a_bar).sqrt() * eps_img
-        assert torch.allclose(x_t, x_t_re, atol=1e-6), 'Mismatch between x_t and eps_img!'
+        
+        # Use q_sample instead of add_noise for correct broadcasting
+        eps_img = torch.randn_like(image_tensor)
+        x_t = self.noise_scheduler.q_sample(image_tensor, t, eps_img)
 
         return {
             'x_t': x_t.squeeze(0),
@@ -450,7 +447,10 @@ class SingleImageOverfitDataset(Dataset):
     
     def __getitem__(self, idx):
         t = torch.randint(0, self.T, (1,), device=self.device).long()
-        x_t, eps_img = self.noise_scheduler.add_noise(self.image_tensor, t)
+        
+        # Use q_sample for correct 4D tensor broadcasting
+        eps_img = torch.randn_like(self.image_tensor)
+        x_t = self.noise_scheduler.q_sample(self.image_tensor, t, eps_img)
         
         return {
             'x_t': x_t.squeeze(0),
