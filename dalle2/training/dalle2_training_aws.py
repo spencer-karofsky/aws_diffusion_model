@@ -421,16 +421,17 @@ class BaseTrainer(ABC):
                 if self.use_amp:
                     with autocast('cuda'):
                         eps_hat = self._run_batch(batch_input=batch_input)
+                        # Compute loss inside autocast too
+                        loss = self._compute_batch_loss(
+                            target=eps_img,
+                            predicted=eps_hat
+                        )
                 else:
                     eps_hat = self._run_batch(batch_input=batch_input)
-      #          z_img,t = self._abl(z_img,t,self.ABLATE_ZERO,self.ABLATE_SHUFFLE)
-     #           eps_hat = self.train_module(x_t, t, t, z_img)
-
-                # Compute loss between predicted and true noise
-                loss = self._compute_batch_loss(
-                    target=eps_img,
-                    predicted=eps_hat
-                )
+                    loss = self._compute_batch_loss(
+                        target=eps_img,
+                        predicted=eps_hat
+                    )
 
 
                 cos_eps = F.cosine_similarity(
