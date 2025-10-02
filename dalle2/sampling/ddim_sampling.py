@@ -203,11 +203,12 @@ class DecoderDDIMSampler:
         B, device = z_img.size(0), z_img.device
         H, W = image_size
         x_t = torch.randn(B, 3, H, W, device=device)
+        
+        print(f"[DDIM] Starting with x_t: mean={x_t.mean():.4f}, std={x_t.std():.4f}")
 
         for i, t_i in enumerate(self.timesteps):
             t = torch.full((B,), t_i, dtype=torch.long, device=device)
 
-            # Only use guidance if scale != 1.0 AND model was trained for it
             if self.guidance_scale == 1.0:
                 eps = model(x_t=x_t, z_img=z_img, t=t)
             else:
@@ -216,8 +217,12 @@ class DecoderDDIMSampler:
                 eps = eps_uncond + self.guidance_scale * (eps_cond - eps_uncond)
             
             x0 = self._predict_x0(x_t, eps, t)
+            
+            if i % 10 == 0:  # Print every 10 steps
+                print(f"[DDIM] Step {i}, t={t_i}: x_t mean={x_t.mean():.4f}, x0 mean={x0.mean():.4f}, eps mean={eps.mean():.4f}")
 
             if i == len(self.timesteps) - 1:
+                print(f"[DDIM] Final x0: mean={x0.mean():.4f}, std={x0.std():.4f}, range=[{x0.min():.4f}, {x0.max():.4f}]")
                 return x0.clamp(-1, 1)
 
             t_next = torch.full((B,), self.timesteps[i + 1], dtype=torch.long, device=device)
