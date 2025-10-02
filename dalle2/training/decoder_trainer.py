@@ -14,7 +14,7 @@ import torch.optim as optim
 
 from dalle2.models.decoder import Decoder
 from dalle2.sampling.noise_scheduler import NoiseScheduler
-from dalle2.training.dalle2_training import DecoderTrainer
+from dalle2.training.dalle2_training_aws import DecoderTrainer
 from dalle2.data.dataset_utils_2 import MidJourneyDecoderDataset
 
 # Device
