@@ -183,6 +183,9 @@ class DecoderUNet(nn.Module):
             padding=1
         )
 
+        nn.init.zeros_(self.output_proj.weight)
+        nn.init.zeros_(self.output_proj.bias)
+
         # Add attention capabilities
         self.encoder_attn_blocks = nn.ModuleList()
         self.decoder_attn_blocks = nn.ModuleList()
