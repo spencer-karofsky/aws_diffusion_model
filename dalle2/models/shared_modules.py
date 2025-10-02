@@ -196,14 +196,13 @@ class ResidualBlock(nn.Module):
         # Validate params against expected inputs
         assert x.dim() == 4, f'[ResidualBlock] x ({x.size()}) expected to have 4 dims: (B, in_channels, H, W)'
         assert cond_emb.dim() == 2, f'[ResidualBlock] cond_emb ({cond_emb.size()}) expected to have 2 dims: (B, cond_dim)'
-        
+
         x_B, x_in_ch, x_H, x_W = x.size(0), x.size(1), x.size(2), x.size(3)
         cond_emb_B, cond_emb_dim = cond_emb.size(0), cond_emb.size(1)
 
         assert x_B == cond_emb_B, f'[ResidualBlock] x and cond_emb have different batch sizes ({x.size(0)} vs. {cond_emb.size(0)})'
         assert x_in_ch == self.in_channels, f'[ResidualBlock] input channels differ between class defintion ({self.in_channels}) and passed in ({x_in_ch})'
         assert cond_emb_dim == self.cond_dim, f'[ResidualBlock] conditional embedding dim differs between class defintion ({self.cond_dim}) and passed in ({cond_emb_dim})'
-        
 
         if self.debug:
             x_size = x.size()
@@ -223,10 +222,13 @@ class ResidualBlock(nn.Module):
             print(f'[ResidualBlock] output x actual size: {x.size()}')
             print(f'[ResidualBlock] output x expected size: {x_size}\n')
 
+        # Apply norm2 BEFORE FiLM so FiLM can actually modulate the features
+        x = self.norm2(x)
+
         # Inject conditioning (broadcasted)
         # FiLM conditioning
-        scale_shift = self.film(cond_emb) # (B, 2 * out_channels)
-        scale, shift = scale_shift.chunk(2, dim=1) # (B, out_channels), (B, out_channels)
+        scale_shift = self.film(cond_emb)  # (B, 2 * out_channels)
+        scale, shift = scale_shift.chunk(2, dim=1)  # (B, out_channels), (B, out_channels)
 
         # Broadcast to (B, C, H, W)
         scale = scale.unsqueeze(-1).unsqueeze(-1)
@@ -236,10 +238,9 @@ class ResidualBlock(nn.Module):
         x = x * (1 + scale) + shift
 
         if self.debug:
-            print(f'[ResidualBlock] x actual output size: {x.size()}')
+            print(f'[ResidualBlock] x actual output size after FiLM: {x.size()}')
             print(f'[ResidualBlock] x expected output size: ({x_B, self.out_channels}, {x_H}, {x_W})\n')
 
-        x = self.norm2(x)
         x = self.act2(x)
         x = self.conv2(x)
 
@@ -250,8 +251,8 @@ class ResidualBlock(nn.Module):
         out = x + residual
 
         if self.debug:
-            print(f'[ResidualBlock] x actual output size: {x.size()}')
-            print(f'[ResidualBlock] x expected output size: ({x_B, self.out_channels}, {x_H}, {x_W})\n')
+            print(f'[ResidualBlock] final output size: {out.size()}')
+            print(f'[ResidualBlock] expected output size: ({x_B, self.out_channels}, {x_H}, {x_W})\n')
 
         return out
 
