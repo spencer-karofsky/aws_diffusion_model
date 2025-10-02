@@ -38,6 +38,7 @@ import csv
 import boto3
 import tempfile
 import math
+from torch.amp import autocast, GradScaler
 
 import matplotlib
 matplotlib.use("Agg")
@@ -88,6 +89,7 @@ class BaseTrainer(ABC):
             shuffle: bool = True,
             on_aws: bool = False,
             debug: bool = False,
+            use_amp: bool = False
     ):
         """
         Base trainer for all classes.
@@ -109,6 +111,9 @@ class BaseTrainer(ABC):
         self.model_save_name = model_save_name
         self.on_aws = on_aws
         self.debug = debug
+        self.use_amp = use_amp
+        self.scaler = GradScaler('cuda') if use_amp else None
+
         self.use_cosine_lr = True
         self.lr_max = 1e-4
         self.lr_min = 2e-5
@@ -411,7 +416,12 @@ class BaseTrainer(ABC):
                 z_img, t = self._abl(z_img, t, self.ABLATE_ZERO, self.ABLATE_SHUFFLE)
                # t_emb = self.get_timestep_embedding(t)
                 batch_input = (x_t, z_img, t)
-                eps_hat = self._run_batch(batch_input=batch_input)
+                # eps_hat = self._run_batch(batch_input=batch_input)
+                if self.use_amp:
+                    with autocast('cuda'):
+                        eps_hat = self._run_batch(batch_input=batch_input)
+                else:
+                    eps_hat = self._run_batch(batch_input=batch_input)
       #          z_img,t = self._abl(z_img,t,self.ABLATE_ZERO,self.ABLATE_SHUFFLE)
      #           eps_hat = self.train_module(x_t, t, t, z_img)
 

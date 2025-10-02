@@ -26,7 +26,7 @@ device = (
 
 # Constants
 TARGET_IMG_SIZE = 64
-BATCH_SIZE = 128
+BATCH_SIZE = 32
 REPEATS = 1  # keep at 1 for the quick test
 
 # Model, optimizer, scheduler
@@ -63,12 +63,13 @@ trainer = DecoderTrainer(
     model_save_name='decoder_model_overfit',
     debug=False,
     shuffle=True,
-    on_aws=True
+    on_aws=True,
+    use_amp=True
 )
 
 if __name__ == '__main__':
     trainer.train(
-        num_epochs=10,
+        num_epochs=30,
         save_intermediate_output=50,
         save_intermediate_model=200,
        # resume_checkpoint_name='dalle2/checkpoints/prior/epoch5_batch625.pth'
