@@ -30,7 +30,7 @@ BATCH_SIZE = 256
 REPEATS = 1  # keep at 1 for the quick test
 
 # Model, optimizer, scheduler
-decoder_model = Decoder(device=device, debug=True, T=1000, img_size=64)
+decoder_model = Decoder(device=device, debug=True, T=1000)
 optimizer = optim.AdamW(decoder_model.parameters(), lr=1e-4)
 noise_scheduler = NoiseScheduler(T=1000, schedule_type='cosine')
 
