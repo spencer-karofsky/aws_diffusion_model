@@ -438,12 +438,12 @@ class BaseTrainer(ABC):
                     eps_hat.flatten(1), eps_img.flatten(1), dim=1
                 ).mean().item()
 
-                if batch_i % 25 == 0:
+                if batch_i % save_intermediate_output == 0:
                     print(f"[cos_eps] {cos_eps:.4f}")
 
 
                 # Debug: log stats every 100 batches
-                if (batch_i + 1) % 25 == 0:
+                if (batch_i + 1) % save_intermediate_output == 0:
                     print(f"[Epoch {epoch + 1}, Batch {batch_i + 1}] Loss: {loss.item():.6f}")
                     print(f"  x_t:     mean={x_t.mean().item():.4f}, std={x_t.std().item():.4f}")
                     print(f"  eps_img: mean={eps_img.mean().item():.4f}, std={eps_img.std().item():.4f}")
