@@ -42,6 +42,7 @@ class NoiseScheduler:
             T: the number of timesteps
             schedule_type: linear or cosine
         """
+        self.T = T
         # Initialize device (ideally using GPU)
         self.device = 'cuda' if torch.cuda.is_available() else 'mps' if torch.mps.is_available() else 'cpu'
         self.debug = False
