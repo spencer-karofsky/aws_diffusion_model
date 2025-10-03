@@ -106,36 +106,48 @@ def debug_direct_sampling(denoiser, sched, z_img, steps=200, H=64, W=64, device=
 def debug_inference(model, scheduler, batch, device, n_steps=50,
                     epoch: int = 0, batch_i: int = 0, on_aws: bool = False, s3_client=None):
     """
-    Runs DDIM denoising for one batch and saves rollout to intermediate outputs.
-    Also mirrors to S3 if on_aws=True.
+    Runs DDIM denoising for one batch and saves a grid of intermediate samples.
     """
-    model.eval()
+    import torchvision.utils as vutils
 
+    model.eval()
     z_img = batch["z_img"].to(device)
     B, H, W = batch["x_t"].shape[0], batch["x_t"].shape[-2], batch["x_t"].shape[-1]
 
-    sampler = DecoderDDIMSampler(
-        noise_scheduler=scheduler,
-        num_inference_steps=n_steps,
-        eta=0.0
-    )
+    sampler = DecoderDDIMSampler(scheduler, num_inference_steps=n_steps, eta=0.0)
 
-    imgs = sampler.sample(model, z_img, image_size=(H, W))
+    # start from Gaussian noise
+    x_t = torch.randn(B, 3, H, W, device=device)
 
-    # map [-1,1] → [0,1] for saving
-    imgs = (imgs + 1) / 2
+    samples = []
+    for i, t_i in enumerate(sampler.timesteps):
+        t = torch.full((B,), t_i, dtype=torch.long, device=device)
+        eps = model(x_t=x_t, z_img=z_img, t=t)
+        x0 = sampler._predict_x0(x_t, eps, t)
 
-    # Local save
+        # save snapshots every ~10% of steps
+        if i % max(1, len(sampler.timesteps) // 10) == 0 or i == len(sampler.timesteps) - 1:
+            samples.append(x0.detach().cpu().clamp(-1, 1))
+
+        if i < len(sampler.timesteps) - 1:
+            t_next = torch.full((B,), sampler.timesteps[i+1], dtype=torch.long, device=device)
+            x_t = sampler._ddim_step(x0, eps, t, t_next)
+
+    # grid visualization
+    grid = vutils.make_grid(torch.cat(samples, dim=0), nrow=len(samples), normalize=True, scale_each=True)
+
     save_dir = "dalle2/checkpoints/decoder_intermediate_outputs"
     os.makedirs(save_dir, exist_ok=True)
     save_path = os.path.join(save_dir, f"epoch_{epoch}_batch_{batch_i}_rollout.png")
 
-    from torchvision.utils import save_image
-    save_image(imgs, save_path)
+    plt.figure(figsize=(20, 4))
+    plt.imshow(grid.permute(1, 2, 0).numpy())
+    plt.axis("off")
+    plt.savefig(save_path, bbox_inches="tight", pad_inches=0.1)
+    plt.close()
 
-    print(f"[DEBUG] Saved rollout → {save_path}")
+    print(f"[DEBUG] Saved rollout grid → {save_path}")
 
-    # Optional S3 upload
     if on_aws and s3_client is not None:
         key = f"decoder/intermediate_outputs/epoch_{epoch}_batch_{batch_i}_rollout.png"
         try:
@@ -145,7 +157,7 @@ def debug_inference(model, scheduler, batch, device, n_steps=50,
             print(f"[WARN] S3 upload failed: {e}")
 
     model.train()
-    return imgs
+
 
 
 
