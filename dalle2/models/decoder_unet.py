@@ -184,7 +184,7 @@ class DecoderUNet(nn.Module):
         )
 
         # Initialize output layer with larger gain to compensate for signal suppression
-        nn.init.xavier_uniform_(self.output_proj.weight, gain=2.0)
+        nn.init.xavier_uniform_(self.output_proj.weight, gain=1.0)
         nn.init.zeros_(self.output_proj.bias)
 
         # Add attention capabilities
