@@ -97,6 +97,10 @@ def sanity_check(trainer, batch):
     mae_x0 = (x0_hat - x0).abs().mean().item()
 
     print(f"[SanityCheck] MAE(eps): {mae_eps:.4f}, MAE(x0): {mae_x0:.4f}")
+    print(f"t={t.item()}, abar={abar.mean().item():.6f}")
+    print(f"x0 stats:    mean={x0.mean().item():.4f}, std={x0.std().item():.4f}")
+    print(f"x0_hat stats: mean={x0_hat.mean().item():.4f}, std={x0_hat.std().item():.4f}")
+
 
 
 
@@ -467,7 +471,7 @@ class BaseTrainer(ABC):
                 if batch_i % save_intermediate_output == 0 and self.module_type == "decoder":
                     sanity_check(self, batch)
 
-                    
+
 
                 # Debug: log stats every 100 batches
                 if (batch_i + 1) % save_intermediate_output == 0:
