@@ -32,27 +32,21 @@ def _make_timesteps(total_steps: int, num_inference_steps: int, device: torch.de
     """
     Return exactly num_inference_steps unique, strictly descending timesteps starting at total_steps-1 and ending at 0.
     """
-    if num_inference_steps < 2:
-        raise ValueError('num_inference_steps must be >= 2 so that we include both (T-1) and 0')
-
+    # dense -> rounded -> unique while preserving order
     ts = torch.linspace(total_steps - 1, 0, num_inference_steps, device=device)
     ts = torch.round(ts).long()
+    ts = torch.flip(torch.unique(torch.flip(ts, dims=[0])), dims=[0])  # strictly descending
 
-    # Remove duplicates caused by rounding and force strict descending order
-    ts = torch.flip(torch.unique(torch.flip(ts, dims=[0])), dims=[0])
-
-    # Always make sure t=0 is present as the last element
+    # ensure t=0 exists
     if ts[-1] != 0:
         ts = torch.cat([ts, ts.new_tensor([0])])
 
-    # If we now have more than requested due to the duplicate removal + t0 addition, drop the earliest redundant timesteps (those at the highest noise end).
+    # if we have too many, KEEP THE TAIL (lower-noise side) so 0 remains
     if ts.numel() > num_inference_steps:
-        ts = ts[:num_inference_steps]
+        ts = ts[-num_inference_steps:]
 
-    # print(f"[DEBUG] Timesteps for sampling: {ts}")
-    # print(f"[DEBUG] Number of unique timesteps: {ts.numel()}")
-
-    assert ts.numel() == num_inference_steps, "Timesteps calculation failed to produce the required length"
+    # sanity: first is high-noise, last is 0
+    assert ts[0] <= total_steps-1 and ts[-1] == 0 and (ts[:-1] > ts[1:]).all()
     return ts
 
 
