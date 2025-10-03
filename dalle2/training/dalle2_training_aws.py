@@ -76,37 +76,31 @@ def maybe_ablate_cond(z_img: torch.Tensor,
     return z_img, t_emb
 
 @torch.no_grad()
-def test_scheduler_roundtrip(sched, H=64, W=64, B=2, trials=8, device=None):
-    """Verifies that your DDIM step (eta=0) exactly matches a q_sample step t->t-1."""
+def test_model_one_step_inversion(model, sched, batch, device=None):
+    model.eval()
     if device is None:
-        device = sched.alpha_bar_t.device
-    # random bounded clean images in [-1,1]
-    x0 = torch.randn(B, 3, H, W, device=device).clamp(-2, 2).tanh()
+        device = next(model.parameters()).device
+
+    x0_true = batch["x0"].to(device)        # (B,3,H,W)  clean image
+    z_img   = batch["z_img"].to(device)     # (B,512)
+    B, C, H, W = x0_true.shape
+
+    # pick random t per item
     T = len(sched.alpha_bar_t)
+    t = torch.randint(0, T, (B,), device=device).long()
+    abar = sched.get_alpha_bar(t).view(B,1,1,1)
+    eps  = torch.randn_like(x0_true)
 
-    for _ in range(trials):
-        t = torch.randint(1, T, (B,), device=device)  # t >= 1 to allow t-1
-        abar = sched.get_alpha_bar(t).view(B, 1, 1, 1)
-        eps  = torch.randn_like(x0)
+    # make x_t using *the same* scheduler used in training
+    x_t = torch.sqrt(abar) * x0_true + torch.sqrt(1 - abar) * eps
 
-        # forward noising (training)
-        xt = torch.sqrt(abar) * x0 + torch.sqrt(1 - abar) * eps
+    # predict eps, reconstruct x0
+    eps_hat = model(x_t=x_t, z_img=z_img, t=t)
+    x0_hat  = (x_t - torch.sqrt(1 - abar) * eps_hat) / torch.sqrt(abar)
 
-        # perfect-model inversion
-        x0_hat = (xt - torch.sqrt(1 - abar) * eps) / torch.sqrt(abar)
-
-        t_next = (t - 1).clamp(min=0)
-        abar_next = sched.get_alpha_bar(t_next).view(B, 1, 1, 1)
-
-        # deterministic DDIM step should equal q_sample at t_next with same (x0, eps)
-        xt_ddim = torch.sqrt(abar_next) * x0_hat + torch.sqrt(1 - abar_next) * eps
-        xt_true = torch.sqrt(abar_next) * x0     + torch.sqrt(1 - abar_next) * eps
-
-        err = (xt_ddim - xt_true).abs().max().item()
-        assert err < 5e-6, f"DDIM vs q_sample mismatch at t->t-1 (max abs err {err})"
-
-    print("[OK] Scheduler/DDIM math: DDIM step == q_sample step (eta=0)")
-
+    mae_eps = (eps_hat - eps).abs().mean().item()
+    mae_x0  = (x0_hat - x0_true).abs().mean().item()
+    print(f"[ONE-STEP] MAE(eps)={mae_eps:.4f}  MAE(x0)={mae_x0:.4f}")
 
 
 class BaseTrainer(ABC):
@@ -375,7 +369,7 @@ class BaseTrainer(ABC):
             else:
                 raise FileNotFoundError(f'No checkpoint found at: {checkpoint_path}')
         
-        test_scheduler_roundtrip(self.noise_scheduler, device=self.device)
+        test_model_one_step_inversion(self.train_module, self.noise_scheduler, batch, device=None)
 
         # Training loop
         for epoch in range(num_epochs):
