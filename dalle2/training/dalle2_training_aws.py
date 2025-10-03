@@ -558,13 +558,13 @@ class BaseTrainer(ABC):
             img_true, z_img = self.dataloader.dataset.get_random_clean_image_and_embedding()
 
 #            t = torch.tensor([self.noise_scheduler.T - 1], device=z_img.device)
-            t = torch.tensor([len(self.noise_scheduler.beta_t) - 1], device=z_img.device)
+            # t = torch.tensor([len(self.noise_scheduler.beta_t) - 1], device=z_img.device)
 
-            from dalle2.utils.embeddings import get_timestep_embedding
-            t_emb = get_timestep_embedding(t)
+            # from dalle2.utils.embeddings import get_timestep_embedding
+            # t_emb = get_timestep_embedding(t)
 
-            # Inject ablation if needed
-            z_img, t_emb = self._abl(z_img, t_emb, self.ABLATE_ZERO, self.ABLATE_SHUFFLE)
+            # # Inject ablation if needed
+            # z_img, t_emb = self._abl(z_img, t_emb, self.ABLATE_ZERO, self.ABLATE_SHUFFLE)
 
             sampler = DecoderDDIMSampler(self.noise_scheduler, num_inference_steps=steps, guidance_scale=1.0)
 
