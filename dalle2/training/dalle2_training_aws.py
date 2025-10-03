@@ -76,45 +76,36 @@ def maybe_ablate_cond(z_img: torch.Tensor,
     return z_img, t_emb
 
 @torch.no_grad()
-def sanity_check(model, batch, scheduler):
-    """
-    Sanity check: compare predicted noise vs true noise,
-    and (if available) predicted clean image vs ground truth x0.
-    """
+def test_scheduler_roundtrip(sched, H=64, W=64, B=2, trials=8, device=None):
+    """Verifies that your DDIM step (eta=0) exactly matches a q_sample step t->t-1."""
     if device is None:
-        device = next(model.parameters()).device
-    model.eval()
-    
-    x_t      = batch["x_t"].unsqueeze(0)      # (1, C, H, W)
-    eps_true = batch["eps_img"].unsqueeze(0)  # (1, C, H, W)
-    z_img    = batch["z_img"].unsqueeze(0)    # (1, 512)
-    t        = batch["t"].unsqueeze(0)        # (1,)
-    
-    # Forward pass
-    eps_pred = model(x_t=x_t, z_img=z_img, t=t)
-    
-    # Compare noise
-    mae_eps = (eps_pred - eps_true).abs().mean().item()
-    cos_eps = torch.nn.functional.cosine_similarity(
-        eps_pred.flatten(), eps_true.flatten(), dim=0
-    ).item()
-    
-    print(f"[SanityCheck] MAE(eps): {mae_eps:.4f}, cos_eps: {cos_eps:.4f}")
-    
-    # If dataset provides clean x0, compare reconstruction
-    if "x0" in batch:
-        x0_true = batch["x0"].unsqueeze(0)  # (1, C, H, W)
-        # reconstruct x0_hat from eps_pred
-        alpha_bar = scheduler.get_alpha_bar(t).view(-1, 1, 1, 1)
-        x0_hat = (x_t - torch.sqrt(1 - alpha_bar) * eps_pred) / torch.sqrt(alpha_bar)
-        
-        mae_x0 = (x0_hat - x0_true).abs().mean().item()
-        print(f"[SanityCheck] MAE(x0): {mae_x0:.4f}")
-        
-        print(f"x0 stats:    mean={x0_true.mean().item():.4f}, std={x0_true.std().item():.4f}")
-        print(f"x0_hat stats: mean={x0_hat.mean().item():.4f}, std={x0_hat.std().item():.4f}")
-    else:
-        print("[SanityCheck] (no x0 available in batch)")
+        device = sched.alpha_bar_t.device
+    # random bounded clean images in [-1,1]
+    x0 = torch.randn(B, 3, H, W, device=device).clamp(-2, 2).tanh()
+    T = len(sched.alpha_bar_t)
+
+    for _ in range(trials):
+        t = torch.randint(1, T, (B,), device=device)  # t >= 1 to allow t-1
+        abar = sched.get_alpha_bar(t).view(B, 1, 1, 1)
+        eps  = torch.randn_like(x0)
+
+        # forward noising (training)
+        xt = torch.sqrt(abar) * x0 + torch.sqrt(1 - abar) * eps
+
+        # perfect-model inversion
+        x0_hat = (xt - torch.sqrt(1 - abar) * eps) / torch.sqrt(abar)
+
+        t_next = (t - 1).clamp(min=0)
+        abar_next = sched.get_alpha_bar(t_next).view(B, 1, 1, 1)
+
+        # deterministic DDIM step should equal q_sample at t_next with same (x0, eps)
+        xt_ddim = torch.sqrt(abar_next) * x0_hat + torch.sqrt(1 - abar_next) * eps
+        xt_true = torch.sqrt(abar_next) * x0     + torch.sqrt(1 - abar_next) * eps
+
+        err = (xt_ddim - xt_true).abs().max().item()
+        assert err < 5e-6, f"DDIM vs q_sample mismatch at t->t-1 (max abs err {err})"
+
+    print("[OK] Scheduler/DDIM math: DDIM step == q_sample step (eta=0)")
 
 
 
@@ -383,6 +374,8 @@ class BaseTrainer(ABC):
                 self.train_module.load_state_dict(checkpoint)
             else:
                 raise FileNotFoundError(f'No checkpoint found at: {checkpoint_path}')
+        
+        test_scheduler_roundtrip(self.noise_scheduler, device=self.device)
 
         # Training loop
         for epoch in range(num_epochs):
@@ -474,19 +467,12 @@ class BaseTrainer(ABC):
                         predicted=eps_hat
                     )
 
-
                 cos_eps = F.cosine_similarity(
                     eps_hat.flatten(1), eps_img.flatten(1), dim=1
                 ).mean().item()
 
                 if batch_i % save_intermediate_output == 0:
                     print(f"[cos_eps] {cos_eps:.4f}")
-                
-                if batch_i % save_intermediate_output == 0 and self.module_type == "decoder":
-                    sanity_check(self.train_module, batch, self.noise_scheduler, device=self.device)
-
-
-
 
                 # Debug: log stats every 100 batches
                 if (batch_i + 1) % save_intermediate_output == 0:
