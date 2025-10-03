@@ -103,17 +103,17 @@ def debug_direct_sampling(denoiser, sched, z_img, steps=200, H=64, W=64, device=
 
 
 @torch.no_grad()
-def debug_inference(model, scheduler, batch, device, n_steps=50, save_dir="/tmp/debug_samples"):
+def debug_inference(model, scheduler, batch, device, n_steps=50,
+                    epoch: int = 0, batch_i: int = 0, on_aws: bool = False, s3_client=None):
     """
-    Runs DDIM denoising for one batch and saves intermediate samples.
+    Runs DDIM denoising for one batch and saves rollout to intermediate outputs.
+    Also mirrors to S3 if on_aws=True.
     """
     model.eval()
-    os.makedirs(save_dir, exist_ok=True)
 
-    z_img = batch["z_img"].to(device)       # conditioning
-    B, H, W = batch["x_t"].shape[0], 64, 64 # or infer H,W dynamically
+    z_img = batch["z_img"].to(device)
+    B, H, W = batch["x_t"].shape[0], batch["x_t"].shape[-2], batch["x_t"].shape[-1]
 
-    # Use the real sampler
     sampler = DecoderDDIMSampler(
         noise_scheduler=scheduler,
         num_inference_steps=n_steps,
@@ -122,14 +122,31 @@ def debug_inference(model, scheduler, batch, device, n_steps=50, save_dir="/tmp/
 
     imgs = sampler.sample(model, z_img, image_size=(H, W))
 
-    # Save output
+    # map [-1,1] → [0,1] for saving
+    imgs = (imgs + 1) / 2
+
+    # Local save
+    save_dir = "dalle2/checkpoints/decoder_intermediate_outputs"
+    os.makedirs(save_dir, exist_ok=True)
+    save_path = os.path.join(save_dir, f"epoch_{epoch}_batch_{batch_i}_rollout.png")
+
     from torchvision.utils import save_image
-    save_path = os.path.join(save_dir, "rollout.png")
-    save_image((imgs + 1) / 2, save_path)  # map back from [-1,1] → [0,1]
+    save_image(imgs, save_path)
+
     print(f"[DEBUG] Saved rollout → {save_path}")
+
+    # Optional S3 upload
+    if on_aws and s3_client is not None:
+        key = f"decoder/intermediate_outputs/epoch_{epoch}_batch_{batch_i}_rollout.png"
+        try:
+            s3_client.upload_file(save_path, "dalle2-outputs", key)
+            print(f"[DEBUG] Uploaded rollout to s3://dalle2-outputs/{key}")
+        except Exception as e:
+            print(f"[WARN] S3 upload failed: {e}")
 
     model.train()
     return imgs
+
 
 
 
@@ -408,7 +425,17 @@ class BaseTrainer(ABC):
             
             for batch_i, batch in enumerate(tqdm(self.dataloader, desc='Training', leave=True)): # leave=True keeps each progress bar after training                
                 if batch_i % 200 == 0 and self.module_type == "decoder":
-                    debug_inference(self.train_module, self.noise_scheduler, batch, self.device, n_steps=50)
+                    debug_inference(
+                        self.train_module,
+                        self.noise_scheduler,
+                        batch,
+                        self.device,
+                        n_steps=50,
+                        epoch=epoch+1,
+                        batch_i=batch_i+1,
+                        on_aws=self.on_aws,
+                        s3_client=getattr(self, "s3", None)
+                    )
 
                 
                 # Get batch data (different depending on the prior vs decoder) and pass to correct PyTorch device
