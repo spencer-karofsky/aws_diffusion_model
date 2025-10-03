@@ -43,29 +43,29 @@ images_dir = "/home/ec2-user/data/train_img"
 # images_dir = 'dalle2/data/local_datasets/midjourney_v6/images'
 
 # Dataset
-# dataset = MidJourneyDecoderDataset(
-#     metadata_path=metadata_path,
-#     images_dir=images_dir,
-#     device=device,
-#     resize_size=TARGET_IMG_SIZE,
-#     noise_scheduler=noise_scheduler,
-#     n_repeat=REPEATS,
-#     # Optional: pick a larger persistent cache directory on the instance
-#     # cache_dir="/home/ec2-user/dalle2_cache",
-#     precomputed_embeddings_path='/home/ec2-user/data/precomputed_embeddings.pt'
-# )
+dataset = MidJourneyDecoderDataset(
+    metadata_path=metadata_path,
+    images_dir=images_dir,
+    device=device,
+    resize_size=TARGET_IMG_SIZE,
+    noise_scheduler=noise_scheduler,
+    n_repeat=REPEATS,
+    # Optional: pick a larger persistent cache directory on the instance
+    # cache_dir="/home/ec2-user/dalle2_cache",
+    precomputed_embeddings_path='/home/ec2-user/data/precomputed_embeddings.pt'
+)
 
 embedding_data = torch.load('/home/ec2-user/data/precomputed_embeddings.pt')
 z_img = embedding_data['embeddings'][0]
 image_path = f"/home/ec2-user/data/train_img/{embedding_data['image_paths'][0]}"
 
-dataset = SingleImageOverfitDataset(
-    image_path=image_path,
-    z_img=z_img,
-    device=device,
-    noise_scheduler=noise_scheduler,
-    resize_size=TARGET_IMG_SIZE
-)
+# dataset = SingleImageOverfitDataset(
+#     image_path=image_path,
+#     z_img=z_img,
+#     device=device,
+#     noise_scheduler=noise_scheduler,
+#     resize_size=TARGET_IMG_SIZE
+# )
 
 BATCH_SIZE = 1
 
@@ -85,8 +85,8 @@ trainer = DecoderTrainer(
 
 if __name__ == '__main__':
     trainer.train(
-        num_epochs=30,
+        num_epochs=150,
         save_intermediate_output=50,
         save_intermediate_model=100,
-        resume_checkpoint_name='epoch30_batch500_ema.pth'
+    #    resume_checkpoint_name='epoch30_batch500_ema.pth'
     )
