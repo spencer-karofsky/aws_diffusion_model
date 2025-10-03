@@ -486,7 +486,7 @@ class BaseTrainer(ABC):
                 if loss.item() < 1e-3:
                     fname = f"epoch{epoch+1}_batch{batch_i+1}_goodloss.pth"
                     print(f"[INFO] 🎉 Loss {loss.item():.6f} < 1e32 — saving checkpoint: {fname}")
-                    self._run_intermediate_decoder_preview(epoch + 1, batch_i + 1, loss, steps=50, n_img=3)
+                    self._run_intermediate_decoder_preview(epoch + 1, batch_i + 1, loss, steps=200, n_img=3)
                     if self.on_aws:
                         with tempfile.TemporaryDirectory() as td:
                             local_path = os.path.join(td, fname)
@@ -501,7 +501,7 @@ class BaseTrainer(ABC):
                 self._log_loss(epoch + 1, batch_i + 1, loss, plot_interval=save_intermediate_output)
 
                 if (batch_i + 1) % save_intermediate_output == 0 and self.module_type == 'decoder':
-                    self._run_intermediate_decoder_preview(epoch + 1, batch_i + 1, loss, steps=50, n_img=3)
+                    self._run_intermediate_decoder_preview(epoch + 1, batch_i + 1, loss, steps=200, n_img=3)
                 
                 if (batch_i + 1) % save_intermediate_output == 0 and self.module_type == 'prior':
                     self.save_intermediate_prior_cosine(epoch + 1, batch_i + 1, loss, n_embs=1)
@@ -538,7 +538,7 @@ class BaseTrainer(ABC):
             epoch: int,
             batch: int,
             loss: float,
-            steps: int = 200,
+            steps: int,
             n_img: int = 3
     ) -> None:
         """
