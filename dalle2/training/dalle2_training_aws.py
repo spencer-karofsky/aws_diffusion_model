@@ -102,50 +102,35 @@ def debug_direct_sampling(denoiser, sched, z_img, steps=200, H=64, W=64, device=
         x_t = torch.sqrt(abar_next) * x0 + torch.sqrt(1 - abar_next) * eps
 
 
-import matplotlib.pyplot as plt
-import torchvision.utils as vutils
-import os
-
 @torch.no_grad()
 def debug_inference(model, scheduler, batch, device, n_steps=50, save_dir="/tmp/debug_samples"):
     """
-    Runs a full denoising loop on one batch and saves a grid of intermediate samples.
+    Runs DDIM denoising for one batch and saves intermediate samples.
     """
     model.eval()
-
-    x_t = batch["x_t"].to(device)  # ensure shape (B,3,H,W)
-    z_img = batch["z_img"].to(device)
-    B = x_t.shape[0]
-
     os.makedirs(save_dir, exist_ok=True)
-    samples = []
 
-    # choose timesteps (linearly spaced for inspection)
-    timesteps = torch.linspace(scheduler.T-1, 0, n_steps, dtype=torch.long, device=device)
+    z_img = batch["z_img"].to(device)       # conditioning
+    B, H, W = batch["x_t"].shape[0], 64, 64 # or infer H,W dynamically
 
-    xt = x_t.clone()
-    for i, t in enumerate(timesteps):
-        t = t.unsqueeze(0).repeat(B)
-        eps_hat = model(x_t=xt, z_img=z_img, t=t)
+    # Use the real sampler
+    sampler = DecoderDDIMSampler(
+        noise_scheduler=scheduler,
+        num_inference_steps=n_steps,
+        eta=0.0
+    )
 
-        # one reverse step
-        xt = scheduler.p_sample(x_t=xt, t=t, eps=eps_hat)
+    imgs = sampler.sample(model, z_img, image_size=(H, W))
 
-        if i % (n_steps // 10) == 0 or i == n_steps-1:
-            # save snapshot every ~10% progress
-            snapshot = xt.detach().cpu().clamp(-1,1)
-            samples.append(snapshot)
+    # Save output
+    from torchvision.utils import save_image
+    save_path = os.path.join(save_dir, "rollout.png")
+    save_image((imgs + 1) / 2, save_path)  # map back from [-1,1] → [0,1]
+    print(f"[DEBUG] Saved rollout → {save_path}")
 
-    # make a grid of stepwise samples
-    grid = vutils.make_grid(torch.cat(samples, dim=0), nrow=len(samples), normalize=True, scale_each=True)
-    plt.figure(figsize=(20,4))
-    plt.imshow(grid.permute(1,2,0).numpy())
-    plt.axis("off")
-    plt.savefig(os.path.join(save_dir, "rollout.png"))
-    plt.close()
-
-    print(f"[DEBUG] Saved rollout with {len(samples)} snapshots → {save_dir}/rollout.png")
     model.train()
+    return imgs
+
 
 
 
