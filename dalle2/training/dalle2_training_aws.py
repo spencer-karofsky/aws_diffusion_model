@@ -113,8 +113,8 @@ def debug_inference(model, scheduler, batch, device, n_steps=50, save_dir="/tmp/
     """
     model.eval()
 
-    x_t = batch["x_t"].unsqueeze(0).to(device)  # ensure shape (B,3,H,W)
-    z_img = batch["z_img"].unsqueeze(0).to(device)
+    x_t = batch["x_t"].to(device)  # ensure shape (B,3,H,W)
+    z_img = batch["z_img"].to(device)
     B = x_t.shape[0]
 
     os.makedirs(save_dir, exist_ok=True)
