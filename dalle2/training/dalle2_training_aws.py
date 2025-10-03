@@ -111,11 +111,11 @@ def debug_inference(model, scheduler, batch, device, n_steps: int = 50):
     model.eval()
 
     # Grab batch
-    x0      = batch["x0"].unsqueeze(0).to(device) if "x0" in batch else None
-    x_t     = batch["x_t"].unsqueeze(0).to(device)
-    eps     = batch["eps_img"].unsqueeze(0).to(device)
-    z_img   = batch["z_img"].unsqueeze(0).to(device)
-    t       = batch["t"].unsqueeze(0).to(device)
+    x0      = batch["x0"].to(device) if "x0" in batch else None
+    x_t     = batch["x_t"].to(device)
+    eps     = batch["eps_img"].to(device)
+    z_img   = batch["z_img"].to(device)
+    t       = batch["t"].to(device)
 
     # --- Step 1: One-step inversion
     eps_hat = model(x_t=x_t, z_img=z_img, t=t)
