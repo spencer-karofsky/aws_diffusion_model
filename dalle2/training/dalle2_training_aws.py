@@ -81,6 +81,8 @@ def sanity_check(model, batch, scheduler):
     Sanity check: compare predicted noise vs true noise,
     and (if available) predicted clean image vs ground truth x0.
     """
+    if device is None:
+        device = next(model.parameters()).device
     model.eval()
     
     x_t      = batch["x_t"].unsqueeze(0)      # (1, C, H, W)
