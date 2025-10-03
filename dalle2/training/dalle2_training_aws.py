@@ -663,7 +663,7 @@ class BaseTrainer(ABC):
             # sampler = DecoderDDIMSampler(self.noise_scheduler, num_inference_steps=steps, guidance_scale=1.0)
 
             img_gen = debug_direct_sampling(
-                denoiser=self.train_module,           # << the SAME module you train
+                denoiser=self.ema_model,           # << the SAME module you train
                 sched=self.noise_scheduler,
                 z_img=z_img,
                 steps=200,
