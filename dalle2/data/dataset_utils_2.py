@@ -375,6 +375,7 @@ class MidJourneyDecoderDataset(Dataset):
         row = self.df.iloc[row_idx]
         img_path = self._resolve_img_path(str(row['image_path']))
 
+        # Load and preprocess clean image
         image = Image.open(img_path).convert('RGB')
         image_tensor = self.transform(image).unsqueeze(0).to(self.device)  # (1, 3, H, W)
 
@@ -386,18 +387,19 @@ class MidJourneyDecoderDataset(Dataset):
                 z_img = self.clip_encoder.encode_image(image_tensor).to(self.device)
                 z_img = z_img / z_img.norm(dim=-1, keepdim=True)
         
+        # Sample timestep and noise
         t = torch.randint(0, self.T, (1,), device=self.device).long()
-        
-        # Use q_sample instead of add_noise for correct broadcasting
         eps_img = torch.randn_like(image_tensor)
         x_t = self.noise_scheduler.q_sample(image_tensor, t, eps_img)
 
         return {
-            'x_t': x_t.squeeze(0),
-            'z_img': z_img.squeeze(0),
-            't': t.squeeze(0),
-            'eps_img': eps_img.squeeze(0)
+            'x_t': x_t.squeeze(0), # Noisy image
+            'z_img': z_img.squeeze(0), # CLIP image embedding
+            't': t.squeeze(0), # Timestep
+            'eps_img': eps_img.squeeze(0), # True noise
+            'x0': image_tensor.squeeze(0), # Clean image
         }
+
 
     def get_random_clean_image_and_embedding(self):
         idx = random.randint(0, len(self.df) - 1)
@@ -448,16 +450,17 @@ class SingleImageOverfitDataset(Dataset):
     def __getitem__(self, idx):
         t = torch.randint(0, self.T, (1,), device=self.device).long()
         
-        # Use q_sample for correct 4D tensor broadcasting
         eps_img = torch.randn_like(self.image_tensor)
         x_t = self.noise_scheduler.q_sample(self.image_tensor, t, eps_img)
         
         return {
-            'x_t': x_t.squeeze(0),
-            'z_img': self.z_img.squeeze(0),
-            't': t.squeeze(0),
-            'eps_img': eps_img.squeeze(0)
+            'x_t': x_t.squeeze(0), # Noisy image
+            'z_img': self.z_img.squeeze(0), # CLIP image embedding
+            't': t.squeeze(0), # Timestep
+            'eps_img': eps_img.squeeze(0), # True noise
+            'x0': self.image_tensor.squeeze(0), # Clean image (ground truth)
         }
+
     
     def get_random_clean_image_and_embedding(self):
         return self.image_tensor, self.z_img.unsqueeze(0)
