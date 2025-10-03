@@ -739,7 +739,7 @@ class BaseTrainer(ABC):
             with torch.no_grad():
                 img_gen = sampler.sample(
                     model=self.ema_model, 
-                    z_img=z_img.unsqueeze(0),   # add batch dim
+                    z_img=z_img,   # add batch dim
                     image_size=(img_true.shape[-2], img_true.shape[-1])
                 )
 
