@@ -481,7 +481,8 @@ class BaseTrainer(ABC):
                     print(f"[cos_eps] {cos_eps:.4f}")
                 
                 if batch_i % save_intermediate_output == 0 and self.module_type == "decoder":
-                    sanity_check(self, batch, self.noise_scheduler)
+                    sanity_check(self.train_module, batch, self.noise_scheduler, device=self.device)
+
 
 
 
