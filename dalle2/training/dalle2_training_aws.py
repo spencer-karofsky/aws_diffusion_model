@@ -335,19 +335,19 @@ class BaseTrainer(ABC):
         pass
     
     def _save_current_model(self, epoch: int, batch_i: int) -> None:
-        fname = f'epoch{epoch}_batch{batch_i}.pth'
+        fname = f'epoch{epoch}_batch{batch_i}_ema.pth'
         if self.on_aws:
             # save to a temp file then upload
             import tempfile
             with tempfile.TemporaryDirectory() as td:
                 local_path = os.path.join(td, fname)
-                torch.save(self.train_module.state_dict(), local_path)
+                torch.save(self.ema_model.state_dict(), local_path)
                 key = f'{self.module_type}/checkpoints/{fname}'
                 self._s3_put(local_path, key)
         else:
             os.makedirs(f'dalle2/checkpoints/{self.module_type}', exist_ok=True)
             save_path = f'dalle2/checkpoints/{self.module_type}/{fname}'
-            torch.save(self.train_module.state_dict(), save_path)
+            torch.save(self.ema_model.state_dict(), save_path)
 
     def _save_final_model(self) -> None:
         fname = 'final_trained_model.pth'
