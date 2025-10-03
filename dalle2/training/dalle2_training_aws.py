@@ -102,6 +102,48 @@ def debug_direct_sampling(denoiser, sched, z_img, steps=200, H=64, W=64, device=
         x_t = torch.sqrt(abar_next) * x0 + torch.sqrt(1 - abar_next) * eps
 
 
+@torch.no_grad()
+def debug_inference(model, scheduler, batch, device, n_steps: int = 50):
+    """
+    Debug inference loop: tests q_sample vs DDIM reverse consistency,
+    multi-step denoising, and prints stats.
+    """
+    model.eval()
+
+    # Grab batch
+    x0      = batch["x0"].unsqueeze(0).to(device) if "x0" in batch else None
+    x_t     = batch["x_t"].unsqueeze(0).to(device)
+    eps     = batch["eps_img"].unsqueeze(0).to(device)
+    z_img   = batch["z_img"].unsqueeze(0).to(device)
+    t       = batch["t"].unsqueeze(0).to(device)
+
+    # --- Step 1: One-step inversion
+    eps_hat = model(x_t=x_t, z_img=z_img, t=t)
+    alpha_bar = scheduler.get_alpha_bar(t).view(-1, 1, 1, 1)
+    x0_hat = (x_t - torch.sqrt(1 - alpha_bar) * eps_hat) / torch.sqrt(alpha_bar)
+
+    mae_eps = (eps_hat - eps).abs().mean().item()
+    print(f"[ONE-STEP] MAE(eps)={mae_eps:.4f}")
+
+    if x0 is not None:
+        mae_x0 = (x0_hat - x0).abs().mean().item()
+        print(f"[ONE-STEP] MAE(x0)={mae_x0:.4f}")
+
+    # --- Step 2: Multi-step denoising
+    from dalle2.sampling.ddim_sampling import DecoderDDIMSampler
+    sampler = DecoderDDIMSampler(scheduler, num_inference_steps=n_steps, eta=0.0)
+    x_t_gen = torch.randn_like(x_t)
+
+    for i, t_cur in enumerate(sampler.timesteps[:5]):  # just first few steps
+        t_cur = t_cur.expand(x_t.shape[0]).to(device)
+        eps_hat = model(x_t=x_t_gen, z_img=z_img, t=t_cur)
+        x0_hat  = sampler._predict_x0(x_t_gen, eps_hat, t_cur)
+        print(f"[Step {i}] x0_hat mean={x0_hat.mean():.3f}, std={x0_hat.std():.3f}")
+        if i < len(sampler.timesteps)-1:
+            t_next = sampler.timesteps[i+1].expand(x_t.shape[0]).to(device)
+            x_t_gen = sampler._ddim_step(x0_hat, eps_hat, t_cur, t_next)
+
+
 class BaseTrainer(ABC):
     def __init__(
             self,
@@ -375,6 +417,10 @@ class BaseTrainer(ABC):
             epoch_loss = 0.0
             
             for batch_i, batch in enumerate(tqdm(self.dataloader, desc='Training', leave=True)): # leave=True keeps each progress bar after training                
+                if batch_i % 200 == 0 and self.module_type == "decoder":
+                    debug_inference(self.train_module, self.noise_scheduler, batch, self.device, n_steps=50)
+
+                
                 # Get batch data (different depending on the prior vs decoder) and pass to correct PyTorch device
                 if self.module_type == 'prior':
                     # Inputs
