@@ -215,6 +215,12 @@ class DecoderDDIMSampler:
                 print(f"  x_t: mean={x_t.mean().item():.4f}, std={x_t.std().item():.4f}")
                 print(f"  eps: mean={eps.mean().item():.4f}, std={eps.std().item():.4f}")
                 print(f"  x0:  mean={x0.mean().item():.4f}, std={x0.std().item():.4f}")
+                
+                # NEW: Check if denoising is happening
+                print(f"  alpha_bar_cur: {_extract_alpha_bar(self.scheduler, t, x_t.ndim).mean().item():.6f}")
+                if i < len(self.timesteps) - 1:
+                    t_next_val = torch.full((B,), self.timesteps[i + 1], dtype=torch.long, device=device)
+                    print(f"  alpha_bar_next: {_extract_alpha_bar(self.scheduler, t_next_val, x_t.ndim).mean().item():.6f}")
 
             if i == len(self.timesteps) - 1:
                 return x0.clamp(-1, 1)
