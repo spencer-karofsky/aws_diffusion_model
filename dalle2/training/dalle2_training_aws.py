@@ -437,22 +437,27 @@ class BaseTrainer(ABC):
                 )
 
             if os.path.isfile(checkpoint_path):
-                print(f"Resuming from checkpoint: {checkpoint_path}")
+                print(f'Resuming from checkpoint: {checkpoint_path}')
                 checkpoint = torch.load(checkpoint_path, map_location=self.device)
 
-                self.train_module.load_state_dict(checkpoint["train_module"])
-                self.ema_model.load_state_dict(checkpoint["ema_model"])
+                if isinstance(checkpoint, dict) and "train_module" in checkpoint:
+                    self.train_module.load_state_dict(checkpoint["train_module"])
+                    self.ema_model.load_state_dict(checkpoint["ema_model"])
+                    if "optimizer" in checkpoint:
+                        self.optimizer.load_state_dict(checkpoint["optimizer"])
+                    if self.scaler and checkpoint.get("scaler") is not None:
+                        self.scaler.load_state_dict(checkpoint["scaler"])
+                    start_epoch = checkpoint.get("epoch", 0)
+                    start_batch = checkpoint.get("batch", 0)
+                    print(f"[INFO] Resumed training at epoch {start_epoch}, batch {start_batch}")
+                else:
+                    print("[WARN] Loading legacy checkpoint format (EMA-only state_dict).")
+                    try:
+                        self.ema_model.load_state_dict(checkpoint)
+                        self.train_module.load_state_dict(checkpoint)
+                    except Exception as e:
+                        print(f"[ERROR] Could not load legacy state_dict: {e}")
 
-                if "optimizer" in checkpoint:
-                    self.optimizer.load_state_dict(checkpoint["optimizer"])
-                if self.scaler and checkpoint.get("scaler") is not None:
-                    self.scaler.load_state_dict(checkpoint["scaler"])
-
-                start_epoch = checkpoint.get("epoch", 0)
-                start_batch = checkpoint.get("batch", 0)
-                print(f"Resumed training at epoch {start_epoch}, batch {start_batch}")
-            else:
-                raise FileNotFoundError(f"No checkpoint found at: {checkpoint_path}")
 
         
 
