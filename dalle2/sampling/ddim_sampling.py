@@ -221,3 +221,5 @@ class DecoderDDIMSampler:
 
             t_next = torch.full((B,), self.timesteps[i + 1], dtype=torch.long, device=device)
             x_t = self._ddim_step(x0, eps, t, t_next)
+        
+        return x_t.clamp(-1, 1)
