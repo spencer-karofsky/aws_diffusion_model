@@ -632,6 +632,81 @@ class BaseTrainer(ABC):
             raise FileNotFoundError(f"[ERROR] Failed to download checkpoint {key} from S3: {e}")
 
 
+    # def _run_intermediate_decoder_preview(
+    #         self,
+    #         epoch: int,
+    #         batch: int,
+    #         loss: float,
+    #         steps: int,
+    #         n_img: int = 3
+    # ) -> None:
+    #     """
+    #     Generate and save an image from the current decoder checkpoint using DDIM.
+
+    #     Args:
+    #         epoch: used for naming the file
+    #         batch: the current batch
+    #         loss: the current batch loss
+    #         steps: number of DDIM steps to use
+    #         n_img: number of sample images to generate
+    #     """
+    #     plt.close()
+    #     _, ax = plt.subplots(2, n_img, sharex=True, sharey=True)
+
+    #     for i in range(n_img):
+    #         img_true, z_img = self.dataloader.dataset.get_random_clean_image_and_embedding()
+    #         z_img = z_img.to(self.device)
+            
+    #         # print(f"Target image - mean: {img_true.mean().item():.4f}, std: {img_true.std().item():.4f}")
+    #         # print(f"Target image - min: {img_true.min().item():.4f}, max: {img_true.max().item():.4f}")
+
+    #         # sampler = DecoderDDIMSampler(self.noise_scheduler, num_inference_steps=steps, guidance_scale=1.0)
+
+    #         img_gen = debug_direct_sampling(
+    #             denoiser=self.ema_model,           # << the SAME module you train
+    #             sched=self.noise_scheduler,
+    #             z_img=z_img,
+    #             steps=200,
+    #             H=img_true.shape[-2],
+    #             W=img_true.shape[-1],
+    #             device=self.device
+    #         )
+
+    #         # Clamp and convert to [0, 1]
+    #         img_gen = img_gen.clamp(-1, 1)
+    #         img_gen = (img_gen + 1) / 2
+    #         img_gen = img_gen.squeeze(0).permute(1, 2, 0).cpu().numpy()
+
+    #         # Process ground truth image
+    #         img_true_np = img_true.detach().cpu().squeeze(0).permute(1, 2, 0).numpy()
+    #         img_true_np = (img_true_np + 1) / 2  # optional: only if your images are [-1,1]
+
+    #         ax[0, i].imshow(img_true_np)
+    #         ax[0, i].axis('off')
+    #         ax[0, i].set_title('target')
+
+    #         ax[1, i].imshow(img_gen)
+    #         ax[1, i].axis('off')
+    #         ax[1, i].set_title('generated')
+
+    #     # Create directory if needed
+    #     output_dir = 'dalle2/checkpoints/decoder_intermediate_outputs'
+    #     os.makedirs(output_dir, exist_ok=True)
+
+    #     # Save figure
+    #     plt.suptitle(f'Epoch: {epoch}, Batch: {batch}, Loss: {loss:.6f}')
+    #     save_path = os.path.join(output_dir, f'epoch_{epoch}_batch_{batch}_output.png')
+    #     plt.savefig(save_path, bbox_inches='tight', pad_inches=0.1)
+    #     plt.close()
+
+    #     # NEW: upload to S3
+    #     if self.on_aws:
+    #         key = f"decoder/intermediate_outputs/epoch_{epoch}_batch_{batch}_output.png"
+    #         self._s3_put(save_path, key)
+
+    #     self.train_module.train()
+    from dalle2.sampling.ddim_sampling import DecoderDDIMSampler
+
     def _run_intermediate_decoder_preview(
             self,
             epoch: int,
@@ -641,45 +716,40 @@ class BaseTrainer(ABC):
             n_img: int = 3
     ) -> None:
         """
-        Generate and save an image from the current decoder checkpoint using DDIM.
-
-        Args:
-            epoch: used for naming the file
-            batch: the current batch
-            loss: the current batch loss
-            steps: number of DDIM steps to use
-            n_img: number of sample images to generate
+        Generate and save images from the current decoder checkpoint using DDIM.
         """
         plt.close()
         _, ax = plt.subplots(2, n_img, sharex=True, sharey=True)
 
+        # build a sampler tied to the current scheduler
+        sampler = DecoderDDIMSampler(
+            noise_scheduler=self.noise_scheduler,
+            num_inference_steps=steps,
+            eta=0.0,                # deterministic
+            guidance_scale=1.0,     # can tune later
+        )
+
         for i in range(n_img):
+            # grab a random clean image + embedding from the dataset
             img_true, z_img = self.dataloader.dataset.get_random_clean_image_and_embedding()
             z_img = z_img.to(self.device)
-            
-            # print(f"Target image - mean: {img_true.mean().item():.4f}, std: {img_true.std().item():.4f}")
-            # print(f"Target image - min: {img_true.min().item():.4f}, max: {img_true.max().item():.4f}")
 
-            # sampler = DecoderDDIMSampler(self.noise_scheduler, num_inference_steps=steps, guidance_scale=1.0)
+            # run DDIM sampling with the EMA weights (smoother!)
+            self.ema_model.eval()
+            with torch.no_grad():
+                img_gen = sampler.sample(
+                    model=self.ema_model, 
+                    z_img=z_img.unsqueeze(0),   # add batch dim
+                    image_size=(img_true.shape[-2], img_true.shape[-1])
+                )
 
-            img_gen = debug_direct_sampling(
-                denoiser=self.ema_model,           # << the SAME module you train
-                sched=self.noise_scheduler,
-                z_img=z_img,
-                steps=200,
-                H=img_true.shape[-2],
-                W=img_true.shape[-1],
-                device=self.device
-            )
-
-            # Clamp and convert to [0, 1]
+            # Clamp and rescale [-1,1] → [0,1]
             img_gen = img_gen.clamp(-1, 1)
             img_gen = (img_gen + 1) / 2
             img_gen = img_gen.squeeze(0).permute(1, 2, 0).cpu().numpy()
 
             # Process ground truth image
-            img_true_np = img_true.detach().cpu().squeeze(0).permute(1, 2, 0).numpy()
-            img_true_np = (img_true_np + 1) / 2  # optional: only if your images are [-1,1]
+            img_true_np = (img_true.detach().cpu().squeeze(0).permute(1, 2, 0).numpy() + 1) / 2
 
             ax[0, i].imshow(img_true_np)
             ax[0, i].axis('off')
@@ -693,18 +763,19 @@ class BaseTrainer(ABC):
         output_dir = 'dalle2/checkpoints/decoder_intermediate_outputs'
         os.makedirs(output_dir, exist_ok=True)
 
-        # Save figure
-        plt.suptitle(f'Epoch: {epoch}, Batch: {batch}, Loss: {loss:.6f}')
         save_path = os.path.join(output_dir, f'epoch_{epoch}_batch_{batch}_output.png')
+        plt.suptitle(f'Epoch: {epoch}, Batch: {batch}, Loss: {loss:.6f}')
         plt.savefig(save_path, bbox_inches='tight', pad_inches=0.1)
         plt.close()
 
-        # NEW: upload to S3
+        # Mirror to S3 if enabled
         if self.on_aws:
             key = f"decoder/intermediate_outputs/epoch_{epoch}_batch_{batch}_output.png"
             self._s3_put(save_path, key)
 
+        # return to train mode
         self.train_module.train()
+
 
     
     def save_intermediate_prior_cosine(
