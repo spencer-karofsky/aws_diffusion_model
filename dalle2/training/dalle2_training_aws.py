@@ -76,31 +76,43 @@ def maybe_ablate_cond(z_img: torch.Tensor,
     return z_img, t_emb
 
 @torch.no_grad()
-def sanity_check(trainer, batch):
+def sanity_check(model, batch, scheduler):
     """
-    Quick probe to confirm that the model is predicting eps correctly
-    and that reconstructed x0 matches the ground truth.
+    Sanity check: compare predicted noise vs true noise,
+    and (if available) predicted clean image vs ground truth x0.
     """
-    x0 = batch['x_t'].to(trainer.device)      # clean image at t=0
-    z_img = batch['z_img'].to(trainer.device)
-    t = batch['t'].to(trainer.device)
-    eps_true = batch['eps_img'].to(trainer.device)
-
-    abar = trainer.noise_scheduler.get_alpha_bar(t).view(-1,1,1,1)
-    xt = torch.sqrt(abar) * x0 + torch.sqrt(1 - abar) * eps_true
-
-    eps_hat = trainer.train_module(x_t=xt, z_img=z_img, t=t)
-
-    x0_hat = (xt - torch.sqrt(1 - abar) * eps_hat) / torch.sqrt(abar)
-
-    mae_eps = (eps_hat - eps_true).abs().mean().item()
-    mae_x0 = (x0_hat - x0).abs().mean().item()
-
-    print(f"[SanityCheck] MAE(eps): {mae_eps:.4f}, MAE(x0): {mae_x0:.4f}")
-    print(f"t={t.item()}, abar={abar.mean().item():.6f}")
-    print(f"x0 stats:    mean={x0.mean().item():.4f}, std={x0.std().item():.4f}")
-    print(f"x0_hat stats: mean={x0_hat.mean().item():.4f}, std={x0_hat.std().item():.4f}")
-
+    model.eval()
+    
+    x_t      = batch["x_t"].unsqueeze(0)      # (1, C, H, W)
+    eps_true = batch["eps_img"].unsqueeze(0)  # (1, C, H, W)
+    z_img    = batch["z_img"].unsqueeze(0)    # (1, 512)
+    t        = batch["t"].unsqueeze(0)        # (1,)
+    
+    # Forward pass
+    eps_pred = model(x_t=x_t, z_img=z_img, t=t)
+    
+    # Compare noise
+    mae_eps = (eps_pred - eps_true).abs().mean().item()
+    cos_eps = torch.nn.functional.cosine_similarity(
+        eps_pred.flatten(), eps_true.flatten(), dim=0
+    ).item()
+    
+    print(f"[SanityCheck] MAE(eps): {mae_eps:.4f}, cos_eps: {cos_eps:.4f}")
+    
+    # If dataset provides clean x0, compare reconstruction
+    if "x0" in batch:
+        x0_true = batch["x0"].unsqueeze(0)  # (1, C, H, W)
+        # reconstruct x0_hat from eps_pred
+        alpha_bar = scheduler.get_alpha_bar(t).view(-1, 1, 1, 1)
+        x0_hat = (x_t - torch.sqrt(1 - alpha_bar) * eps_pred) / torch.sqrt(alpha_bar)
+        
+        mae_x0 = (x0_hat - x0_true).abs().mean().item()
+        print(f"[SanityCheck] MAE(x0): {mae_x0:.4f}")
+        
+        print(f"x0 stats:    mean={x0_true.mean().item():.4f}, std={x0_true.std().item():.4f}")
+        print(f"x0_hat stats: mean={x0_hat.mean().item():.4f}, std={x0_hat.std().item():.4f}")
+    else:
+        print("[SanityCheck] (no x0 available in batch)")
 
 
 
