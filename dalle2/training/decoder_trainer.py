@@ -67,8 +67,6 @@ image_path = f"/home/ec2-user/data/train_img/{embedding_data['image_paths'][0]}"
 #     resize_size=TARGET_IMG_SIZE
 # )
 
-BATCH_SIZE = 1
-
 # Trainer
 trainer = DecoderTrainer(
     train_module=decoder_model,
@@ -78,7 +76,7 @@ trainer = DecoderTrainer(
     batch_size=BATCH_SIZE,
     model_save_name='decoder_model_overfit',
     debug=False,
-    shuffle=False, # Change back later
+    shuffle=True, # Change back later
     on_aws=True,
     use_amp=True
 )
