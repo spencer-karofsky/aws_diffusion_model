@@ -83,8 +83,8 @@ trainer = DecoderTrainer(
 
 if __name__ == '__main__':
     trainer.train(
-        num_epochs=150,
+        num_epochs=300,
         save_intermediate_output=50,
         save_intermediate_model=100,
-    #    resume_checkpoint_name='epoch30_batch500_ema.pth'
+        resume_checkpoint_name='epoch40_batch200.pth'
     )
