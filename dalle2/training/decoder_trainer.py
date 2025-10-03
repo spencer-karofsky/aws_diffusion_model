@@ -88,5 +88,5 @@ if __name__ == '__main__':
         num_epochs=30,
         save_intermediate_output=50,
         save_intermediate_model=100,
-        resume_checkpoint_name='final_trained_model.pth'
+        resume_checkpoint_name='epoch30_batch500_ema.pth'
     )
