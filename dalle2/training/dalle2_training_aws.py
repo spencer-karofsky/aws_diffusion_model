@@ -335,33 +335,47 @@ class BaseTrainer(ABC):
         pass
     
     def _save_current_model(self, epoch: int, batch_i: int) -> None:
-        fname = f'epoch{epoch}_batch{batch_i}_ema.pth'
+        fname = f'epoch{epoch}_batch{batch_i}.pth'
+        checkpoint = {
+            "epoch": epoch,
+            "batch": batch_i,
+            "train_module": self.train_module.state_dict(),
+            "ema_model": self.ema_model.state_dict(),
+            "optimizer": self.optimizer.state_dict(),
+            "scaler": self.scaler.state_dict() if self.scaler else None,
+        }
         if self.on_aws:
-            # save to a temp file then upload
             import tempfile
             with tempfile.TemporaryDirectory() as td:
                 local_path = os.path.join(td, fname)
-                torch.save(self.ema_model.state_dict(), local_path)
-                key = f'{self.module_type}/checkpoints/{fname}'
+                torch.save(checkpoint, local_path)
+                key = f"{self.module_type}/checkpoints/{fname}"
                 self._s3_put(local_path, key)
         else:
-            os.makedirs(f'dalle2/checkpoints/{self.module_type}', exist_ok=True)
-            save_path = f'dalle2/checkpoints/{self.module_type}/{fname}'
-            torch.save(self.ema_model.state_dict(), save_path)
+            os.makedirs(f"dalle2/checkpoints/{self.module_type}", exist_ok=True)
+            save_path = f"dalle2/checkpoints/{self.module_type}/{fname}"
+            torch.save(checkpoint, save_path)
 
     def _save_final_model(self) -> None:
-        fname = 'final_trained_model.pth'
+        fname = "final_trained_model.pth"
+        checkpoint = {
+            "train_module": self.train_module.state_dict(),
+            "ema_model": self.ema_model.state_dict(),
+            "optimizer": self.optimizer.state_dict(),
+            "scaler": self.scaler.state_dict() if self.scaler else None,
+        }
         if self.on_aws:
             import tempfile
             with tempfile.TemporaryDirectory() as td:
                 local_path = os.path.join(td, fname)
-                torch.save(self.train_module.state_dict(), local_path)
-                key = f'{self.module_type}/checkpoints/{fname}'
+                torch.save(checkpoint, local_path)
+                key = f"{self.module_type}/checkpoints/{fname}"
                 self._s3_put(local_path, key)
         else:
-            os.makedirs(f'dalle2/checkpoints/{self.module_type}', exist_ok=True)
-            save_path = f'dalle2/checkpoints/{self.module_type}/{fname}'
-            torch.save(self.train_module.state_dict(), save_path)
+            os.makedirs(f"dalle2/checkpoints/{self.module_type}", exist_ok=True)
+            save_path = f"dalle2/checkpoints/{self.module_type}/{fname}"
+            torch.save(checkpoint, save_path)
+
 
 
     def _upload_file(self, local_path: str, key: str):
@@ -419,15 +433,27 @@ class BaseTrainer(ABC):
                 checkpoint_path = self._download_checkpoint_from_s3(resume_checkpoint_name)
             else:
                 checkpoint_path = os.path.join(
-                    'dalle2', 'checkpoints', self.module_type, resume_checkpoint_name
+                    "dalle2", "checkpoints", self.module_type, resume_checkpoint_name
                 )
 
             if os.path.isfile(checkpoint_path):
-                print(f'Resuming from checkpoint: {checkpoint_path}')
+                print(f"Resuming from checkpoint: {checkpoint_path}")
                 checkpoint = torch.load(checkpoint_path, map_location=self.device)
-                self.train_module.load_state_dict(checkpoint)
+
+                self.train_module.load_state_dict(checkpoint["train_module"])
+                self.ema_model.load_state_dict(checkpoint["ema_model"])
+
+                if "optimizer" in checkpoint:
+                    self.optimizer.load_state_dict(checkpoint["optimizer"])
+                if self.scaler and checkpoint.get("scaler") is not None:
+                    self.scaler.load_state_dict(checkpoint["scaler"])
+
+                start_epoch = checkpoint.get("epoch", 0)
+                start_batch = checkpoint.get("batch", 0)
+                print(f"Resumed training at epoch {start_epoch}, batch {start_batch}")
             else:
-                raise FileNotFoundError(f'No checkpoint found at: {checkpoint_path}')
+                raise FileNotFoundError(f"No checkpoint found at: {checkpoint_path}")
+
         
 
         # Training loop
