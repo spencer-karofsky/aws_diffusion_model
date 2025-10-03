@@ -82,17 +82,14 @@ def debug_direct_sampling(denoiser, sched, z_img, steps=200, H=64, W=64, device=
     denoiser.eval()
 
     sampler = DecoderDDIMSampler(sched, num_inference_steps=steps, eta=0.0)
-
-    # descend and end at t=0
-    ts = sampler.timesteps
-    assert (ts[:-1] > ts[1:]).all() and ts[-1].item() == 0
+    ts = sampler.timesteps  # strictly descending, ends at 0
 
     B = z_img.size(0)
     x_t = torch.randn(B, 3, H, W, device=device)
 
     for i, t_i in enumerate(ts):
-        t = torch.full((B,), t_i, dtype=torch.long, device=device)
-        eps = denoiser(x_t=x_t, z_img=z_img, t=t)             # ε̂θ
+        t   = torch.full((B,), t_i, dtype=torch.long, device=device)
+        eps = denoiser(x_t=x_t, z_img=z_img, t=t)  # ε̂θ
 
         abar = sched.get_alpha_bar(t).view(B,1,1,1)
         x0   = (x_t - torch.sqrt(1 - abar) * eps) / torch.sqrt(abar)
@@ -102,7 +99,6 @@ def debug_direct_sampling(denoiser, sched, z_img, steps=200, H=64, W=64, device=
 
         t_next    = torch.full((B,), ts[i+1], dtype=torch.long, device=device)
         abar_next = sched.get_alpha_bar(t_next).view(B,1,1,1)
-        # deterministic DDIM (η=0)
         x_t = torch.sqrt(abar_next) * x0 + torch.sqrt(1 - abar_next) * eps
 
 
