@@ -76,31 +76,34 @@ def maybe_ablate_cond(z_img: torch.Tensor,
     return z_img, t_emb
 
 @torch.no_grad()
-def test_model_one_step_inversion(model, sched, batch, device=None):
-    model.eval()
+def debug_direct_sampling(denoiser, sched, z_img, steps=200, H=64, W=64, device=None):
     if device is None:
-        device = next(model.parameters()).device
+        device = next(denoiser.parameters()).device
+    denoiser.eval()
 
-    x0_true = batch["x0"].to(device)        # (B,3,H,W)  clean image
-    z_img   = batch["z_img"].to(device)     # (B,512)
-    B, C, H, W = x0_true.shape
+    sampler = DecoderDDIMSampler(sched, num_inference_steps=steps, eta=0.0)
 
-    # pick random t per item
-    T = len(sched.alpha_bar_t)
-    t = torch.randint(0, T, (B,), device=device).long()
-    abar = sched.get_alpha_bar(t).view(B,1,1,1)
-    eps  = torch.randn_like(x0_true)
+    # descend and end at t=0
+    ts = sampler.timesteps
+    assert (ts[:-1] > ts[1:]).all() and ts[-1].item() == 0
 
-    # make x_t using *the same* scheduler used in training
-    x_t = torch.sqrt(abar) * x0_true + torch.sqrt(1 - abar) * eps
+    B = z_img.size(0)
+    x_t = torch.randn(B, 3, H, W, device=device)
 
-    # predict eps, reconstruct x0
-    eps_hat = model(x_t=x_t, z_img=z_img, t=t)
-    x0_hat  = (x_t - torch.sqrt(1 - abar) * eps_hat) / torch.sqrt(abar)
+    for i, t_i in enumerate(ts):
+        t = torch.full((B,), t_i, dtype=torch.long, device=device)
+        eps = denoiser(x_t=x_t, z_img=z_img, t=t)             # ε̂θ
 
-    mae_eps = (eps_hat - eps).abs().mean().item()
-    mae_x0  = (x0_hat - x0_true).abs().mean().item()
-    print(f"[ONE-STEP] MAE(eps)={mae_eps:.4f}  MAE(x0)={mae_x0:.4f}")
+        abar = sched.get_alpha_bar(t).view(B,1,1,1)
+        x0   = (x_t - torch.sqrt(1 - abar) * eps) / torch.sqrt(abar)
+
+        if i == len(ts) - 1:
+            return x0.clamp(-1, 1)
+
+        t_next    = torch.full((B,), ts[i+1], dtype=torch.long, device=device)
+        abar_next = sched.get_alpha_bar(t_next).view(B,1,1,1)
+        # deterministic DDIM (η=0)
+        x_t = torch.sqrt(abar_next) * x0 + torch.sqrt(1 - abar_next) * eps
 
 
 class BaseTrainer(ABC):
@@ -375,12 +378,7 @@ class BaseTrainer(ABC):
             print(f'Epoch {epoch + 1}/{num_epochs}')
             epoch_loss = 0.0
             
-            for batch_i, batch in enumerate(tqdm(self.dataloader, desc='Training', leave=True)): # leave=True keeps each progress bar after training
-                
-
-                test_model_one_step_inversion(self.train_module, self.noise_scheduler, batch, device=None)
-
-                
+            for batch_i, batch in enumerate(tqdm(self.dataloader, desc='Training', leave=True)): # leave=True keeps each progress bar after training                
                 # Get batch data (different depending on the prior vs decoder) and pass to correct PyTorch device
                 if self.module_type == 'prior':
                     # Inputs
@@ -586,28 +584,22 @@ class BaseTrainer(ABC):
 
         for i in range(n_img):
             img_true, z_img = self.dataloader.dataset.get_random_clean_image_and_embedding()
+            z_img = z_img.to(self.device)
             
-            print(f"Target image - mean: {img_true.mean().item():.4f}, std: {img_true.std().item():.4f}")
-            print(f"Target image - min: {img_true.min().item():.4f}, max: {img_true.max().item():.4f}")
+            # print(f"Target image - mean: {img_true.mean().item():.4f}, std: {img_true.std().item():.4f}")
+            # print(f"Target image - min: {img_true.min().item():.4f}, max: {img_true.max().item():.4f}")
 
-#            t = torch.tensor([self.noise_scheduler.T - 1], device=z_img.device)
-            # t = torch.tensor([len(self.noise_scheduler.beta_t) - 1], device=z_img.device)
+            # sampler = DecoderDDIMSampler(self.noise_scheduler, num_inference_steps=steps, guidance_scale=1.0)
 
-            # from dalle2.utils.embeddings import get_timestep_embedding
-            # t_emb = get_timestep_embedding(t)
-
-            # # Inject ablation if needed
-            # z_img, t_emb = self._abl(z_img, t_emb, self.ABLATE_ZERO, self.ABLATE_SHUFFLE)
-
-            sampler = DecoderDDIMSampler(self.noise_scheduler, num_inference_steps=steps, guidance_scale=1.0)
-
-            self.train_module.eval()
-            with torch.no_grad():
-                img_gen = self.train_module.sample(
-                    steps=steps,
-                    z_img=z_img,
-                    sampler=sampler
-                )
+            img_gen = debug_direct_sampling(
+                denoiser=self.train_module,           # << the SAME module you train
+                sched=self.noise_scheduler,
+                z_img=z_img,
+                steps=200,
+                H=img_true.shape[-2],
+                W=img_true.shape[-1],
+                device=self.device
+            )
 
             # Clamp and convert to [0, 1]
             img_gen = img_gen.clamp(-1, 1)
