@@ -75,6 +75,29 @@ def maybe_ablate_cond(z_img: torch.Tensor,
 
     return z_img, t_emb
 
+@torch.no_grad()
+def sanity_check(trainer, batch):
+    """
+    Quick probe to confirm that the model is predicting eps correctly
+    and that reconstructed x0 matches the ground truth.
+    """
+    x0 = batch['x_t'].to(trainer.device)      # clean image at t=0
+    z_img = batch['z_img'].to(trainer.device)
+    t = batch['t'].to(trainer.device)
+    eps_true = batch['eps_img'].to(trainer.device)
+
+    abar = trainer.noise_scheduler.get_alpha_bar(t).view(-1,1,1,1)
+    xt = torch.sqrt(abar) * x0 + torch.sqrt(1 - abar) * eps_true
+
+    eps_hat = trainer.train_module(x_t=xt, z_img=z_img, t=t)
+
+    x0_hat = (xt - torch.sqrt(1 - abar) * eps_hat) / torch.sqrt(abar)
+
+    mae_eps = (eps_hat - eps_true).abs().mean().item()
+    mae_x0 = (x0_hat - x0).abs().mean().item()
+
+    print(f"[SanityCheck] MAE(eps): {mae_eps:.4f}, MAE(x0): {mae_x0:.4f}")
+
 
 
 class BaseTrainer(ABC):
@@ -440,7 +463,11 @@ class BaseTrainer(ABC):
 
                 if batch_i % save_intermediate_output == 0:
                     print(f"[cos_eps] {cos_eps:.4f}")
+                
+                if batch_i % save_intermediate_output == 0 and self.module_type == "decoder":
+                    sanity_check(self, batch)
 
+                    
 
                 # Debug: log stats every 100 batches
                 if (batch_i + 1) % save_intermediate_output == 0:
