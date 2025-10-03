@@ -369,7 +369,6 @@ class BaseTrainer(ABC):
             else:
                 raise FileNotFoundError(f'No checkpoint found at: {checkpoint_path}')
         
-        test_model_one_step_inversion(self.train_module, self.noise_scheduler, batch, device=None)
 
         # Training loop
         for epoch in range(num_epochs):
@@ -377,6 +376,11 @@ class BaseTrainer(ABC):
             epoch_loss = 0.0
             
             for batch_i, batch in enumerate(tqdm(self.dataloader, desc='Training', leave=True)): # leave=True keeps each progress bar after training
+                
+
+                test_model_one_step_inversion(self.train_module, self.noise_scheduler, batch, device=None)
+
+                
                 # Get batch data (different depending on the prior vs decoder) and pass to correct PyTorch device
                 if self.module_type == 'prior':
                     # Inputs
