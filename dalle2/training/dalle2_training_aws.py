@@ -556,6 +556,9 @@ class BaseTrainer(ABC):
 
         for i in range(n_img):
             img_true, z_img = self.dataloader.dataset.get_random_clean_image_and_embedding()
+            
+            print(f"Target image - mean: {img_true.mean().item():.4f}, std: {img_true.std().item():.4f}")
+            print(f"Target image - min: {img_true.min().item():.4f}, max: {img_true.max().item():.4f}")
 
 #            t = torch.tensor([self.noise_scheduler.T - 1], device=z_img.device)
             # t = torch.tensor([len(self.noise_scheduler.beta_t) - 1], device=z_img.device)
