@@ -186,3 +186,18 @@ class DALLe2Text2Image:
         #img, z_img_hat = pipe.text_to_image(prompt)
         vis = (img.clamp(-1,1)+1)/2
         return img, z_img_hat
+    
+    @torch.no_grad()
+    def embedding_to_image(self, z_img: torch.Tensor) -> torch.Tensor:
+        """
+        Directly generate an image from a given CLIP image embedding.
+        Skips the prior.
+        """
+        z_img = F.normalize(z_img, dim=-1).to(self.dev)
+
+        img = self.decoder.sample(
+            z_img   = z_img,
+            sampler = self.decoder_sampler,
+        )
+
+        return img

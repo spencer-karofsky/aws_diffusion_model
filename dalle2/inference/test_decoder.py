@@ -1,36 +1,36 @@
+import torch
+import matplotlib.pyplot as plt
 from dalle2.inference.inference import DALLe2Text2Image
-from dalle2.data.dataset_utils_2 import MidJourneyDecoderDataset
-from dalle2.sampling.noise_scheduler import NoiseScheduler
-import torch, torchvision, os
 
-os.chdir('/Users/spencerkarofsky/Desktop/projects/aws_diffusion_model')
+def main():
+    # Initialize pipeline (prior loads but won't be used)
+    pipeline = DALLe2Text2Image(
+        prior_path='dalle2/checkpoints/prior/epoch116_batch313.pth',
+        decoder_path='dalle2/checkpoints/decoder/epoch149_batch100.pth',
+        steps_decoder=50,# high quality
+        decoder_cfg_scale=1.0 # no CFG
+    )
 
-pipe = DALLe2Text2Image(
-    prior_path         = 'dalle2/checkpoints/prior/epoch10_batch625_ema.pth',
-    decoder_path       = 'dalle2/checkpoints/decoder/epoch18_batch1250.pth',
-    prior_T            = 200,
-    start_T            = 20,
-    steps_prior        = 10,
-    prior_cfg_scale    = 3.0,
-    decoder_T          = 200,
-    steps_decoder      = 50,
-    decoder_cfg_scale  = 5.75
-)
-metadata_path = "s3://dalle2-data/train_img/metadata.csv"
-images_dir = "s3://dalle2-data/train_img"
-noise_scheduler = NoiseScheduler(T=200, schedule_type='cosine')
-ds = MidJourneyDecoderDataset(
-    metadata_path=metadata_path,
-    images_dir=images_dir,
-    resize_size=128,
-    device='mps',
-    noise_scheduler=noise_scheduler,
-    n_repeat=1,
-    # cache_dir="/home/ec2-user/dalle2_cache",  # if your dataset util supports it
-)
-img_true, z_img_true = ds.get_random_clean_image_and_embedding()
-with torch.no_grad():
-    img_pred = pipe.decoder.sample(z_img_true.to(pipe.dev))
+    # Load precomputed embeddings
+    embeds = torch.load("dalle2/data/local_datasets/midjourney_v6/precomputed_embeddings_full.pt")
 
-torchvision.utils.save_image(img_pred, 'decoder_only.png')
-print('saved → decoder_only.png')
+    # Extract only image embeddings
+    clip_embeds = embeds["image_embeddings"]
+    print(f"Loaded {clip_embeds.shape[0]} image embeddings of dimension {clip_embeds.shape[1]}")
+
+    # Pick random embedding
+    rand_idx = torch.randint(0, clip_embeds.size(0), (1,))
+    z_img_true = clip_embeds[rand_idx].to(pipeline.dev)
+
+    # Run decoder-only inference
+    img = pipeline.embedding_to_image(z_img_true)
+
+    # Visualize
+    vis = (img.clamp(-1, 1) + 1) / 2
+    plt.imshow(vis.squeeze(0).permute(1, 2, 0).cpu().numpy())
+    plt.title("Decoder-only from true CLIP embedding")
+    plt.axis("off")
+    plt.show()
+
+if __name__ == "__main__":
+    main()

@@ -88,7 +88,7 @@ class Prior(nn.Module):
         )
 
         # Instantiate Transformer
-        DIM, BLOCKS, HEADS = 512, 12, 8
+        DIM, BLOCKS, HEADS = 512, 16, 16 # Change back to 512, 12, 8 if errors
         self.prior_transformer = PriorTransformer(
             dim=DIM,
             transformer_blocks=BLOCKS,
