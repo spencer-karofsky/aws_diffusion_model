@@ -188,8 +188,8 @@ class UpsamplerTrainer:
         # Sample noise
         eps = torch.randn_like(x_0)
         
-        # Get alpha_bar for timestep t
-        alpha_bar_t = self.noise_scheduler.alpha_bars[t].view(B, 1, 1, 1)
+        # Get alpha_bar for timestep t (correct attribute name)
+        alpha_bar_t = self.noise_scheduler.alpha_bar_t[t].view(B, 1, 1, 1)
         
         # Add noise: x_t = sqrt(alpha_bar_t) * x_0 + sqrt(1 - alpha_bar_t) * eps
         x_t = torch.sqrt(alpha_bar_t) * x_0 + torch.sqrt(1 - alpha_bar_t) * eps
