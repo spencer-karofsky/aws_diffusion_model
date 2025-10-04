@@ -22,13 +22,16 @@ prior_model = Prior(device=device, T=200)
 optimizer = optim.AdamW(prior_model.parameters(), lr=2e-4)
 noise_scheduler = NoiseScheduler(T=200, schedule_type='cosine')
 
-# Start conservatively; raise once it runs stably.
-BATCH_SIZE = 64
+BATCH_SIZE = 128
 REPEATS = 1
 
 # --- S3 paths ---
-metadata_path = "s3://dalle2-data/train_img/metadata.csv"
-images_dir = "s3://dalle2-data/train_img"
+# metadata_path = "s3://dalle2-data/train_img/metadata.csv"
+# images_dir = "s3://dalle2-data/train_img"
+
+# Local Paths
+metadata_path = 'dalle2/data/local_datasets/midjourney_v6/metadata.csv'
+images_dir = 'dalle2/data/local_datasets/midjourney_v6/images'
 
 dataset = MidJourneyPriorDataset(
     metadata_path=metadata_path,
@@ -38,7 +41,7 @@ dataset = MidJourneyPriorDataset(
     device=device,
     noise_scheduler=noise_scheduler,
     n_repeat=REPEATS,
-    # cache_dir="/home/ec2-user/dalle2_cache",  # if your dataset util supports it
+    precomputed_embeddings_path='dalle2/data/local_datasets/midjourney_v6/precomputed_embeddings_full.pt',
 )
 
 trainer = PriorTrainer(
@@ -47,16 +50,16 @@ trainer = PriorTrainer(
     noise_scheduler=noise_scheduler,
     dataset=dataset,
     batch_size=BATCH_SIZE,
-    model_save_name='prior_model_overfit',
+    model_save_name='prior_model',
     debug=False,
-    shuffle=False,
+    shuffle=True,
     on_aws=False
 )
 
 if __name__ == '__main__':
     trainer.train(
-        num_epochs=10,
+        num_epochs=150,
         save_intermediate_output=5,
         save_intermediate_model=100,
-        resume_checkpoint_name='epoch3_batch100_ema.pth'
+ #       resume_checkpoint_name='epoch3_batch100_ema.pth'
     )

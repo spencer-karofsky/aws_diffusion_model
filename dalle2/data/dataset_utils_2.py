@@ -157,19 +157,154 @@ class S3Cache:
         return self.get_local_path(bucket, key)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Dataset (fixed: embeddings are **unit‑normalised**)
-# ─────────────────────────────────────────────────────────────────────────────
 
+# class MidJourneyPriorDataset(Dataset):
+#     """Dataset that yields noisy‑image‑embedding triplets for training the prior.
+
+#     Each item is a **dict** containing:
+#         z_txt        : (512,)  clean, unit‑norm text embedding
+#         t            : ()      timestep integer
+#         z_img_noisy  : (512,)  noisy image embedding at timestep *t*
+#         eps_img      : (512,)  the ground‑truth noise added to z_img
+#         z_img        : (512,)  clean, unit‑norm image embedding (for metrics)
+#     """
+
+#     def __init__(
+#         self,
+#         metadata_path: str,
+#         images_dir: str,
+#         batch_size: int,
+#         device: torch.device,
+#         noise_scheduler: NoiseScheduler,
+#         resize_size: int = 128,
+#         n_repeat: int = 1,
+#         seed: int = 42,
+#         cache_dir: str = "/tmp/dalle2_cache",
+#     ):
+#         super().__init__()
+#         self.B = batch_size
+#         self.device = device
+#         self.noise_scheduler = noise_scheduler
+#         self.T = noise_scheduler.alpha_bar_t.shape[0]
+#         self.images_dir = images_dir
+#         self.n_repeat = n_repeat
+#         self.seed = seed
+
+#         # ─── optional S3 support ────────────────────────────────────────────
+#         self.using_s3 = is_s3_uri(images_dir)
+#         self.s3_cache = (
+#             S3Cache(cache_dir) if self.using_s3 or is_s3_uri(metadata_path) else None
+#         )
+#         if self.using_s3:
+#             self.s3_bucket, prefix = split_s3_uri(images_dir)
+#             self.s3_prefix = prefix.rstrip("/")
+#         else:
+#             self.s3_bucket, self.s3_prefix = None, None
+
+#         # ─── load metadata CSV ──────────────────────────────────────────────
+#         if is_s3_uri(metadata_path):
+#             bucket, key = split_s3_uri(metadata_path)
+#             local_csv = self.s3_cache.get_csv_as_local(bucket, key)
+#             self.df = pd.read_csv(local_csv)
+#         else:
+#             if not os.path.isfile(metadata_path):
+#                 raise FileNotFoundError(f"metadata.csv not found at {metadata_path}")
+#             self.df = pd.read_csv(metadata_path)
+
+#         # ─── image & CLIP preprocessing ─────────────────────────────────────
+#         self.transform = transforms.Compose(
+#             [
+#                 transforms.Resize((resize_size, resize_size), antialias=True),
+#                 transforms.ToTensor(),
+#                 transforms.Lambda(lambda x: x * 2 - 1),  # map [0,1] → [-1,1]
+#             ]
+#         )
+
+#         self.clip_encoder = CLIPEncoder().to(device).eval()
+#         self.total_len = len(self.df) * n_repeat
+
+#     # ─────────────────────────────────────────────────────────────────────────
+#     # utilities
+#     # ─────────────────────────────────────────────────────────────────────────
+
+#     def __len__(self):
+#         return self.total_len
+
+#     def _resolve_img_path(self, img_path_csv: str) -> str:
+#         if self.using_s3:
+#             fname = os.path.basename(img_path_csv)
+#             key = f"{self.s3_prefix}/{fname}" if self.s3_prefix else fname
+#             return self.s3_cache.get_local_path(self.s3_bucket, key)
+#         if os.path.isabs(img_path_csv):
+#             return img_path_csv
+#         return os.path.join(self.images_dir, os.path.basename(img_path_csv))
+
+#     # ─────────────────────────────────────────────────────────────────────────
+#     # main entry
+#     # ─────────────────────────────────────────────────────────────────────────
+
+#     def __getitem__(self, idx):
+#         row = self.df.iloc[idx % len(self.df)]
+#         caption = row["caption"]
+#         img_path = self._resolve_img_path(str(row["image_path"]))
+
+#         # ---- load & encode --------------------------------------------------
+#         image = Image.open(img_path).convert("RGB")
+#         image_tensor = self.transform(image).unsqueeze(0).to(self.device)
+
+#         with torch.no_grad():
+#             # CLIP embeddings
+#             z_img = self.clip_encoder.encode_image(image_tensor).squeeze(0).to(self.device)
+#             z_txt = self.clip_encoder.encode_text([caption]).squeeze(0).to(self.device)
+
+#             # ★ NORMALISE to unit length ------------------------------------
+#             z_img = F.normalize(z_img, dim=-1)
+#             z_txt = F.normalize(z_txt, dim=-1)
+
+#         # ---- sample diffusion timestep & noise -----------------------------
+#         g = torch.Generator(device=self.device).manual_seed(self.seed + idx)
+#         t = torch.randint(0, self.T, (1,), generator=g, device=self.device)
+#         eps = torch.randn(1, z_img.shape[0], generator=g, device=self.device)
+#         z_img_noisy = self.noise_scheduler.q_sample(z_img.unsqueeze(0), t, eps)
+
+#         return {
+#             "z_txt": z_txt,                # (512,)
+#             "t": t.squeeze(0),
+#             "z_img_noisy": z_img_noisy.squeeze(0),
+#             "eps_img": eps.squeeze(0),
+#             "z_img": z_img,               # clean embedding (optional metrics)
+#         }
+
+#     # ─────────────────────────────────────────────────────────────────────────
+#     # helper for validation / logging
+#     # ─────────────────────────────────────────────────────────────────────────
+
+#     @torch.no_grad()
+#     def get_random_text_and_embedding(self) -> Tuple[torch.Tensor, torch.Tensor]:
+#         idx = random.randint(0, len(self.df) - 1)
+#         row = self.df.iloc[idx]
+#         caption = row["caption"]
+#         img_path = self._resolve_img_path(str(row["image_path"]))
+
+#         image = Image.open(img_path).convert("RGB")
+#         image_tensor = self.transform(image).unsqueeze(0).to(self.device)
+
+#         z_img = self.clip_encoder.encode_image(image_tensor).squeeze(0).to(self.device)
+#         z_txt = self.clip_encoder.encode_text([caption]).squeeze(0).to(self.device)
+
+#         z_img = F.normalize(z_img, dim=-1)
+#         z_txt = F.normalize(z_txt, dim=-1)
+
+#         return z_txt, z_img
 class MidJourneyPriorDataset(Dataset):
-    """Dataset that yields noisy‑image‑embedding triplets for training the prior.
+    """Dataset that yields noisy-image-embedding triplets for training the prior.
 
     Each item is a **dict** containing:
-        z_txt        : (512,)  clean, unit‑norm text embedding
+        z_txt        : (512,)  clean, unit-norm text embedding
         t            : ()      timestep integer
         z_img_noisy  : (512,)  noisy image embedding at timestep *t*
-        eps_img      : (512,)  the ground‑truth noise added to z_img
-        z_img        : (512,)  clean, unit‑norm image embedding (for metrics)
+        eps_img      : (512,)  the ground-truth noise added to z_img
+        z_img        : (512,)  clean, unit-norm image embedding (for metrics)
     """
 
     def __init__(
@@ -183,6 +318,7 @@ class MidJourneyPriorDataset(Dataset):
         n_repeat: int = 1,
         seed: int = 42,
         cache_dir: str = "/tmp/dalle2_cache",
+        precomputed_embeddings_path: str = None,
     ):
         super().__init__()
         self.B = batch_size
@@ -214,21 +350,26 @@ class MidJourneyPriorDataset(Dataset):
                 raise FileNotFoundError(f"metadata.csv not found at {metadata_path}")
             self.df = pd.read_csv(metadata_path)
 
-        # ─── image & CLIP preprocessing ─────────────────────────────────────
-        self.transform = transforms.Compose(
-            [
+        # ─── Load precomputed embeddings or initialize CLIP ─────────────────
+        if precomputed_embeddings_path:
+            print(f"[PriorDataset] Loading precomputed embeddings from {precomputed_embeddings_path}")
+            embedding_data = torch.load(precomputed_embeddings_path)
+            self.image_embeddings = embedding_data['image_embeddings']
+            self.text_embeddings = embedding_data['text_embeddings']
+            self.use_precomputed = True
+            print(f"[PriorDataset] Loaded {len(self.image_embeddings)} precomputed embedding pairs")
+        else:
+            # Fallback to on-the-fly encoding (slow)
+            print("[PriorDataset] Warning: No precomputed embeddings provided, will encode on-the-fly")
+            self.transform = transforms.Compose([
                 transforms.Resize((resize_size, resize_size), antialias=True),
                 transforms.ToTensor(),
-                transforms.Lambda(lambda x: x * 2 - 1),  # map [0,1] → [-1,1]
-            ]
-        )
+                transforms.Lambda(lambda x: x * 2 - 1),
+            ])
+            self.clip_encoder = CLIPEncoder().to(device).eval()
+            self.use_precomputed = False
 
-        self.clip_encoder = CLIPEncoder().to(device).eval()
         self.total_len = len(self.df) * n_repeat
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # utilities
-    # ─────────────────────────────────────────────────────────────────────────
 
     def __len__(self):
         return self.total_len
@@ -242,64 +383,65 @@ class MidJourneyPriorDataset(Dataset):
             return img_path_csv
         return os.path.join(self.images_dir, os.path.basename(img_path_csv))
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # main entry
-    # ─────────────────────────────────────────────────────────────────────────
-
     def __getitem__(self, idx):
-        row = self.df.iloc[idx % len(self.df)]
-        caption = row["caption"]
-        img_path = self._resolve_img_path(str(row["image_path"]))
-
-        # ---- load & encode --------------------------------------------------
-        image = Image.open(img_path).convert("RGB")
-        image_tensor = self.transform(image).unsqueeze(0).to(self.device)
-
-        with torch.no_grad():
-            # CLIP embeddings
-            z_img = self.clip_encoder.encode_image(image_tensor).squeeze(0).to(self.device)
-            z_txt = self.clip_encoder.encode_text([caption]).squeeze(0).to(self.device)
-
-            # ★ NORMALISE to unit length ------------------------------------
-            z_img = F.normalize(z_img, dim=-1)
-            z_txt = F.normalize(z_txt, dim=-1)
-
-        # ---- sample diffusion timestep & noise -----------------------------
+        row_idx = idx % len(self.df)
+        
+        if self.use_precomputed:
+            # Fast path: load precomputed embeddings
+            z_img = self.image_embeddings[row_idx].to(self.device)
+            z_txt = self.text_embeddings[row_idx].to(self.device)
+        else:
+            # Slow path: encode on-the-fly
+            row = self.df.iloc[row_idx]
+            caption = row["caption"]
+            img_path = self._resolve_img_path(str(row["image_path"]))
+            
+            image = Image.open(img_path).convert("RGB")
+            image_tensor = self.transform(image).unsqueeze(0).to(self.device)
+            
+            with torch.no_grad():
+                z_img = self.clip_encoder.encode_image(image_tensor).squeeze(0).to(self.device)
+                z_txt = self.clip_encoder.encode_text([caption]).squeeze(0).to(self.device)
+                
+                z_img = F.normalize(z_img, dim=-1)
+                z_txt = F.normalize(z_txt, dim=-1)
+        
+        # Sample diffusion timestep and noise
         g = torch.Generator(device=self.device).manual_seed(self.seed + idx)
         t = torch.randint(0, self.T, (1,), generator=g, device=self.device)
         eps = torch.randn(1, z_img.shape[0], generator=g, device=self.device)
         z_img_noisy = self.noise_scheduler.q_sample(z_img.unsqueeze(0), t, eps)
 
         return {
-            "z_txt": z_txt,                # (512,)
+            "z_txt": z_txt,
             "t": t.squeeze(0),
             "z_img_noisy": z_img_noisy.squeeze(0),
             "eps_img": eps.squeeze(0),
-            "z_img": z_img,               # clean embedding (optional metrics)
+            "z_img": z_img,
         }
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # helper for validation / logging
-    # ─────────────────────────────────────────────────────────────────────────
 
     @torch.no_grad()
     def get_random_text_and_embedding(self) -> Tuple[torch.Tensor, torch.Tensor]:
         idx = random.randint(0, len(self.df) - 1)
-        row = self.df.iloc[idx]
-        caption = row["caption"]
-        img_path = self._resolve_img_path(str(row["image_path"]))
-
-        image = Image.open(img_path).convert("RGB")
-        image_tensor = self.transform(image).unsqueeze(0).to(self.device)
-
-        z_img = self.clip_encoder.encode_image(image_tensor).squeeze(0).to(self.device)
-        z_txt = self.clip_encoder.encode_text([caption]).squeeze(0).to(self.device)
-
-        z_img = F.normalize(z_img, dim=-1)
-        z_txt = F.normalize(z_txt, dim=-1)
-
+        
+        if self.use_precomputed:
+            z_txt = self.text_embeddings[idx].to(self.device)
+            z_img = self.image_embeddings[idx].to(self.device)
+        else:
+            row = self.df.iloc[idx]
+            caption = row["caption"]
+            img_path = self._resolve_img_path(str(row["image_path"]))
+            
+            image = Image.open(img_path).convert("RGB")
+            image_tensor = self.transform(image).unsqueeze(0).to(self.device)
+            
+            z_img = self.clip_encoder.encode_image(image_tensor).squeeze(0).to(self.device)
+            z_txt = self.clip_encoder.encode_text([caption]).squeeze(0).to(self.device)
+            
+            z_img = F.normalize(z_img, dim=-1)
+            z_txt = F.normalize(z_txt, dim=-1)
+        
         return z_txt, z_img
-
 
 class MidJourneyDecoderDataset(Dataset):
     def __init__(
