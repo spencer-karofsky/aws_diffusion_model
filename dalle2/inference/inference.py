@@ -49,7 +49,9 @@ def prior_short_window_ddim_cfg(
     device: torch.device,
     init_from_text: bool = True,
 ) -> torch.Tensor:
-    """Deterministic DDIM sampling in CLIP‑embedding space using CFG."""
+    """
+    Deterministic DDIM sampling in CLIP-embedding space using CFG.
+    """
     D = z_txt.shape[-1]
 
     # --- discrete timestep schedule --------------------------------------------------
@@ -107,6 +109,7 @@ class DALLe2Text2Image:
         *,
         prior_path: str,
         decoder_path: str,
+        upsampler_path: Optional[str] = None,  # NEW: optional upsampler
         prior_T: int = 1000,
         start_T: int = 180,
         steps_prior: int = 100,
@@ -114,18 +117,21 @@ class DALLe2Text2Image:
         decoder_T: int = 1000,
         steps_decoder: int = 50,
         decoder_cfg_scale: float = 5.75,
+        upsampler_T: int = 250,  # NEW
+        steps_upsampler: int = 50,  # NEW
     ) -> None:
         self.dev = _dev()
 
         # ─── schedulers ────────────────────────────────────────────────────────────
-        self.prior_sched = NoiseScheduler(T=prior_T,   schedule_type="cosine")
+        self.prior_sched = NoiseScheduler(T=prior_T, schedule_type="cosine")
         self.decoder_sched = NoiseScheduler(T=decoder_T, schedule_type="cosine")
-        self.prior_sched.alpha_bar_t   = self.prior_sched.alpha_bar_t.to(self.dev)
+        self.prior_sched.alpha_bar_t = self.prior_sched.alpha_bar_t.to(self.dev)
         self.decoder_sched.alpha_bar_t = self.decoder_sched.alpha_bar_t.to(self.dev)
 
         # ─── models ────────────────────────────────────────────────────────────────
-        self.prior = Prior(device=self.dev, T=prior_T ).eval().to(self.dev)
+        self.prior = Prior(device=self.dev, T=prior_T).eval().to(self.dev)
         self.decoder = Decoder(device=self.dev).eval().to(self.dev)
+        
         # Load prior checkpoint
         prior_checkpoint = torch.load(prior_path, map_location=self.dev)
         if isinstance(prior_checkpoint, dict) and "ema_model" in prior_checkpoint:
@@ -140,6 +146,38 @@ class DALLe2Text2Image:
         else:
             self.decoder.load_state_dict(decoder_checkpoint)
 
+        # ─── NEW: Upsampler (optional) ─────────────────────────────────────────────
+        self.upsampler = None
+        if upsampler_path is not None:
+            from dalle2.models.upsampler import Upsampler
+            from dalle2.sampling.upsampler_ddim_sampling import UpsamplerDDIMSampler
+            
+            self.upsampler = Upsampler(
+                device=self.dev,
+                T=upsampler_T,
+                num_inference_steps=steps_upsampler,
+                low_res_size=64,
+                high_res_size=128,
+                debug=False
+            ).eval().to(self.dev)
+            
+            upsampler_checkpoint = torch.load(upsampler_path, map_location=self.dev)
+            if isinstance(upsampler_checkpoint, dict) and "ema_model" in upsampler_checkpoint:
+                self.upsampler.load_state_dict(upsampler_checkpoint["ema_model"])
+            else:
+                self.upsampler.load_state_dict(upsampler_checkpoint)
+            
+            upsampler_sched = NoiseScheduler(T=upsampler_T, schedule_type="cosine")
+            upsampler_sched.alpha_bar_t = upsampler_sched.alpha_bar_t.to(self.dev)
+            
+            upsampler_sampler = UpsamplerDDIMSampler(
+                noise_scheduler=upsampler_sched,
+                num_inference_steps=steps_upsampler,
+                eta=0.0,
+                device=self.dev
+            )
+            self.upsampler.sampler = upsampler_sampler
+
         # ─── CLIP & null text embedding ────────────────────────────────────────────
         self.clip = CLIPEncoder().eval().to(self.dev)
         self.null_txt = F.normalize(self.clip.encode_text([""]).to(self.dev), dim=-1)
@@ -147,8 +185,8 @@ class DALLe2Text2Image:
         # ─── decoder sampler (DDIM + CFG) ──────────────────────────────────────────
         self.decoder_sampler = DecoderDDIMSampler(
             self.decoder_sched,
-            num_inference_steps = steps_decoder,
-            guidance_scale = decoder_cfg_scale,
+            num_inference_steps=steps_decoder,
+            guidance_scale=decoder_cfg_scale,
         )
 
         # ─── hyper‑params to reuse ─────────────────────────────────────────────────
@@ -158,7 +196,7 @@ class DALLe2Text2Image:
 
     # -------------------------------------------------------------------------
     @torch.no_grad()
-    def text_to_image(self, prompt: str, *, log_cosine: bool = True) -> torch.Tensor:
+    def text_to_image(self, prompt: str, *, log_cosine: bool = True, upsample: bool = True) -> torch.Tensor:
         z_txt = F.normalize(self.clip.encode_text([prompt]), dim=-1).to(self.dev)
 
         assert torch.allclose(z_txt.norm(dim=-1), torch.ones(1, device=z_txt.device)), "z_txt not normalized"
@@ -168,36 +206,27 @@ class DALLe2Text2Image:
         z_img_hat = prior_short_window_ddim_cfg(
             self.prior, self.prior_sched,
             z_txt, self.null_txt,
-            start_t = self.start_T,
-            steps = self.steps_prior,
-            cfg_scale = self.prior_cfg,
-            device = self.dev,
+            start_t=self.start_T,
+            steps=self.steps_prior,
+            cfg_scale=self.prior_cfg,
+            device=self.dev,
         )
 
         if log_cosine:
             cos = F.cosine_similarity(z_txt, z_img_hat, dim=-1).item()
-            print(f"cos(text , img_hat) = {cos:+.4f}")
+            print(f"cos(text, img_hat) = {cos:+.4f}")
     
-        # DECODER ➜ image
+        # DECODER ➜ 64x64 image
         img = self.decoder.sample(
-            z_img   = z_img_hat,
-            sampler = self.decoder_sampler,
+            z_img=z_img_hat,
+            sampler=self.decoder_sampler,
         )
-        #img, z_img_hat = pipe.text_to_image(prompt)
-        vis = (img.clamp(-1,1)+1)/2
+        
+        # UPSAMPLER ➜ 128x128 image (if available and requested)
+        if self.upsampler is not None and upsample:
+            img = self.upsampler.sample(
+                low_res_img=img,
+                z_img=z_img_hat
+            )
+        
         return img, z_img_hat
-    
-    @torch.no_grad()
-    def embedding_to_image(self, z_img: torch.Tensor) -> torch.Tensor:
-        """
-        Directly generate an image from a given CLIP image embedding.
-        Skips the prior.
-        """
-        z_img = F.normalize(z_img, dim=-1).to(self.dev)
-
-        img = self.decoder.sample(
-            z_img   = z_img,
-            sampler = self.decoder_sampler,
-        )
-
-        return img
