@@ -359,7 +359,7 @@ if __name__ == '__main__':
     # (64x64 embeddings already exist at /home/ec2-user/data/precomputed_embeddings.pt)
     
     precompute_upsampler_embeddings(
-        metadata_path='/home/ec2-user/data/metadata.csv',
+        metadata_path='/home/ec2-user/data/train_img/metadata.csv',
         images_dir='/home/ec2-user/data/train_img',
         output_path='/home/ec2-user/data/precomputed_embeddings_128x128.pt',
         resize_size=128,
