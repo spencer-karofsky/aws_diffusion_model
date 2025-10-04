@@ -347,11 +347,19 @@ def precompute_both_resolutions(
 
 
 if __name__ == '__main__':
-    # SageMaker setup - precompute 128x128 embeddings for upsampler
+    # SageMaker setup
+    # Run from: /home/ec2-user/SageMaker/aws_diffusion_model
+    
+    import sys
+    
+    # Add the repo to Python path
+    sys.path.insert(0, '/home/ec2-user/SageMaker/aws_diffusion_model')
+    
+    # Precompute 128x128 embeddings for upsampler
     # (64x64 embeddings already exist at /home/ec2-user/data/precomputed_embeddings.pt)
     
     precompute_upsampler_embeddings(
-        metadata_path='s3://dalle2-datasets/midjourney_v6/metadata.csv',
+        metadata_path='/home/ec2-user/data/metadata.csv',  # Update if metadata is elsewhere
         images_dir='/home/ec2-user/data/train_img',
         output_path='/home/ec2-user/data/precomputed_embeddings_128x128.pt',
         resize_size=128,
