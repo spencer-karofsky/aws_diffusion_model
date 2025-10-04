@@ -73,19 +73,29 @@ def visualize_grid(
 
 def main():
     prompts = [
-        'purple and pink',
+        "A slice of pizza",
+        "A cat sitting on a windowsill",
+        "A red sports car",
+        "A bowl of fruit",
+        "A mountain landscape",
+        "A dog playing in the snow",
+        "A glass of wine",
+        "A sunflower in a vase",
+        "A plate of sushi",
+        "A city skyline at night"
     ]
 
+
     pipeline = DALLe2Text2Image(
-        prior_path = 'dalle2/checkpoints/prior/final_trained_model_ema.pth',
-        decoder_path = 'dalle2/checkpoints/decoder/epoch4_batch800.pth',
-        prior_T = 200,
-        start_T = 0,
-        steps_prior = 1,
-        prior_cfg_scale = 1.0,
-        decoder_T = 200,
-        steps_decoder = 40,
-        decoder_cfg_scale = 5
+        prior_path='dalle2/checkpoints/prior/epoch116_batch313.pth',
+        decoder_path='dalle2/checkpoints/decoder/epoch139_batch100.pth',
+        prior_T=1000,
+        start_T=999,
+        steps_prior=400,
+        prior_cfg_scale=1.0,
+        decoder_T=1000,
+        steps_decoder=400,
+        decoder_cfg_scale=1.0
     )
 
     t0 = time.time()

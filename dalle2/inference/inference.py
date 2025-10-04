@@ -107,11 +107,11 @@ class DALLe2Text2Image:
         *,
         prior_path: str,
         decoder_path: str,
-        prior_T: int = 200,
+        prior_T: int = 1000,
         start_T: int = 180,
         steps_prior: int = 100,
         prior_cfg_scale: float = 7.0,
-        decoder_T: int = 200,
+        decoder_T: int = 1000,
         steps_decoder: int = 50,
         decoder_cfg_scale: float = 5.75,
     ) -> None:
@@ -126,8 +126,19 @@ class DALLe2Text2Image:
         # ─── models ────────────────────────────────────────────────────────────────
         self.prior = Prior(device=self.dev, T=prior_T ).eval().to(self.dev)
         self.decoder = Decoder(device=self.dev).eval().to(self.dev)
-        self.prior.load_state_dict(torch.load(prior_path,   map_location=self.dev), strict=True)
-        self.decoder.load_state_dict(torch.load(decoder_path, map_location=self.dev), strict=False)
+        # Load prior checkpoint
+        prior_checkpoint = torch.load(prior_path, map_location=self.dev)
+        if isinstance(prior_checkpoint, dict) and "ema_model" in prior_checkpoint:
+            self.prior.load_state_dict(prior_checkpoint["ema_model"])
+        else:
+            self.prior.load_state_dict(prior_checkpoint)
+
+        # Load decoder checkpoint  
+        decoder_checkpoint = torch.load(decoder_path, map_location=self.dev)
+        if isinstance(decoder_checkpoint, dict) and "ema_model" in decoder_checkpoint:
+            self.decoder.load_state_dict(decoder_checkpoint["ema_model"])
+        else:
+            self.decoder.load_state_dict(decoder_checkpoint)
 
         # ─── CLIP & null text embedding ────────────────────────────────────────────
         self.clip = CLIPEncoder().eval().to(self.dev)
