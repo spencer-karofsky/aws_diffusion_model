@@ -88,7 +88,7 @@ class Prior(nn.Module):
         )
 
         # Instantiate Transformer
-        DIM, BLOCKS, HEADS = 512, 6, 8 # Optionally reduce to speed-up prior training
+        DIM, BLOCKS, HEADS = 512, 12, 8
         self.prior_transformer = PriorTransformer(
             dim=DIM,
             transformer_blocks=BLOCKS,

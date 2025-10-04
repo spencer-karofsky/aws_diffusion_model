@@ -19,7 +19,7 @@ device = (
 )
 
 prior_model = Prior(device=device, T=1000)
-optimizer = optim.AdamW(prior_model.parameters(), lr=2e-4)
+optimizer = optim.AdamW(prior_model.parameters(), lr=1e-4)
 noise_scheduler = NoiseScheduler(T=1000, schedule_type='cosine')
 
 BATCH_SIZE = 128
