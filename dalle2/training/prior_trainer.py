@@ -18,9 +18,9 @@ device = (
     else 'cpu'
 )
 
-prior_model = Prior(device=device, T=200)
+prior_model = Prior(device=device, T=1000)
 optimizer = optim.AdamW(prior_model.parameters(), lr=2e-4)
-noise_scheduler = NoiseScheduler(T=200, schedule_type='cosine')
+noise_scheduler = NoiseScheduler(T=1000, schedule_type='cosine')
 
 BATCH_SIZE = 128
 REPEATS = 1
@@ -59,7 +59,7 @@ trainer = PriorTrainer(
 if __name__ == '__main__':
     trainer.train(
         num_epochs=150,
-        save_intermediate_output=5,
-        save_intermediate_model=100,
+        save_intermediate_output=100,
+        save_intermediate_model=350,
  #       resume_checkpoint_name='epoch3_batch100_ema.pth'
     )
