@@ -155,8 +155,8 @@ class UpsamplerDDIMSampler:
             x_{t-1}: denoised image at next timestep, shape (B, 3, H, W)
         """
         # Get alpha values
-        alpha_t = self.noise_scheduler.alpha_bars[t]
-        alpha_t_next = self.noise_scheduler.alpha_bars[t_next] if t_next > 0 else torch.tensor(1.0, device=self.device)
+        alpha_t = self.noise_scheduler.alpha_bar_t[t]
+        alpha_t_next = self.noise_scheduler.alpha_bar_t[t_next]
 
         # Reshape alphas for broadcasting
         alpha_t = alpha_t.view(-1, 1, 1, 1)
