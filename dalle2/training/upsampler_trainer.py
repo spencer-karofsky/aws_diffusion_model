@@ -579,13 +579,13 @@ def main():
     # Initialize components
     upsampler = Upsampler(
         device=device,
-        T=1000,
+        T=250,
         num_inference_steps=30,
         low_res_size=64,
         high_res_size=128
     )
     
-    noise_scheduler = NoiseScheduler(T=1000, device=device)
+    noise_scheduler = NoiseScheduler(T=250, device=device)
     
     optimizer = torch.optim.AdamW(
         upsampler.parameters(),
