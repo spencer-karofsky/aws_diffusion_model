@@ -78,20 +78,20 @@ def main():
         "A dog that is grazing in a field",
         "A city skyline at night"
     ]
-    prompts = ['A slice of Pizza' for _ in range(4)]
+    prompts = ['purple and orange sunset' for _ in range(4)]
 
 
     pipeline = DALLe2Text2Image(
         prior_path='dalle2/checkpoints/prior/epoch106_batch313.pth',
         decoder_path='dalle2/checkpoints/decoder/epoch159_batch100.pth',
-        upsampler_path='dalle2/checkpoints/upsampler/epoch3_batch2500.pth',
+        upsampler_path='dalle2/checkpoints/upsampler/epoch8_batch2000.pth',
         prior_T=1000,
         start_T=999,
         steps_prior=200,
-        prior_cfg_scale=1.5,
+        prior_cfg_scale=1.0,
         decoder_T=1000,
         steps_decoder=100,
-        decoder_cfg_scale=1.5,
+        decoder_cfg_scale=1.0,
         upsampler_T=250,
         steps_upsampler=50
     )
@@ -101,7 +101,6 @@ def main():
 
     for prompt in prompts:
         img, _ = pipeline.text_to_image(prompt)
-        img = img[:, :, 2:-2, 2:-2]
         img_tuples_list.append([(pipeline.prior_cfg, img)])
 
     gen_time = time.time() - t0
