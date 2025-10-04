@@ -81,7 +81,7 @@ class Upsampler(nn.Module):
         self.TIMESTEP_DIM = 512
         self.timestep_embedder = TimestepEmbedder(
             dim=self.TIMESTEP_DIM,
-            module='upsampler',
+            module='decoder',
             T=self.T
         )
 
