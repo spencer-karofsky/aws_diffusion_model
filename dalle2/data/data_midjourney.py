@@ -1,5 +1,4 @@
-# scripts/prepare_midjourney_dataset_parallel.py
-import os, math, time, requests, pandas as pd
+import os, time, requests, pandas as pd
 from io import BytesIO
 from PIL import Image
 from tqdm import tqdm
@@ -13,10 +12,10 @@ def _split_2x2(img: Image.Image, trim_px: int = 0) -> List[Image.Image]:
     w, h = img.size
     w2, h2 = w // 2, h // 2
     boxes = [
-        (0,    0,   w2,  h2),  # TL
-        (w2,   0,   w,   h2),  # TR
-        (0,    h2,  w2,  h),   # BL
-        (w2,   h2,  w,   h),   # BR
+        (0, 0, w2, h2),
+        (w2, 0, w, h2),
+        (0, h2, w2, h),
+        (w2, h2,  w, h),
     ]
     if trim_px > 0:
         boxes = [
@@ -81,17 +80,17 @@ def _process_row(
     return out_rows
 
 def prepare_midjourney_local_dataset_parallel(
-    parquet_path: str = "hf://datasets/CortexLM/midjourney-v6/data/train-00000-of-00001.parquet",
-    out_dir: str = "dalle2/data/local_datasets/midjourney_v6",
+    parquet_path: str = 'hf://datasets/CortexLM/midjourney-v6/data/train-00000-of-00001.parquet',
+    out_dir: str = 'dalle2/data/local_datasets/midjourney_v6',
     max_grids: int = 10_000,
-    mode: str = "split",            # "split" -> 4 crops, "single" -> keep top-left only
-    resize_save: int = 256,         # save 256x256 for storage efficiency
+    mode: str = 'split',
+    resize_save: int = 256,
     trim_px: int = 2,
     timeout: int = 15,
-    max_workers: int = 24           # tune: 16–32 is usually good
+    max_workers: int = 24
 ) -> str:
-    assert mode in ("split", "single")
-    images_dir = os.path.join(out_dir, "images")
+    assert mode in ('split', 'single')
+    images_dir = os.path.join(out_dir, 'images')
     _safe_mkdir(images_dir)
     _safe_mkdir(out_dir)
 

@@ -100,8 +100,7 @@ def precompute_embeddings(
     # Stack into tensors
     image_embeddings = torch.stack(image_embeddings)
     text_embeddings = torch.stack(text_embeddings)
-    
-    # Save to disk
+
     print(f"Saving {len(image_embeddings)} embeddings to {output_path}")
     torch.save({
         'image_embeddings': image_embeddings,
@@ -117,7 +116,6 @@ def precompute_embeddings(
 
 
 if __name__ == '__main__':
-    # Example usage
     precompute_embeddings(
         metadata_path='dalle2/data/local_datasets/midjourney_v6/metadata.csv',
         images_dir='dalle2/data/local_datasets/midjourney_v6/images',

@@ -352,18 +352,14 @@ if __name__ == '__main__':
     
     import sys
     
-    # Add the repo to Python path
     sys.path.insert(0, '/home/ec2-user/SageMaker/aws_diffusion_model')
-    
-    # Precompute 128x128 embeddings for upsampler
-    # (64x64 embeddings already exist at /home/ec2-user/data/precomputed_embeddings.pt)
     
     precompute_upsampler_embeddings(
         metadata_path='/home/ec2-user/data/train_img/metadata.csv',
         images_dir='/home/ec2-user/data/train_img',
         output_path='/home/ec2-user/data/precomputed_embeddings_128x128.pt',
         resize_size=128,
-        on_aws=False  # Save locally, not to S3
+        on_aws=False
     )
     
     print("\n" + "="*70)

@@ -10,7 +10,6 @@ Description:
 Author:
     * Spencer Karofsky (https://github.com/spencer-karofsky)
 """
-
 import torch
 from torch.utils.data import Dataset
 import pandas as pd
@@ -31,14 +30,14 @@ from dalle2.sampling.noise_scheduler import NoiseScheduler
 def is_s3_uri(p: str) -> bool:
     return isinstance(p, str) and p.startswith("s3://")
 
-
 def split_s3_uri(uri: str):
     pr = urlparse(uri)
     return pr.netloc, pr.path.lstrip("/")
 
-
 class S3Cache:
-    """Downloads S3 objects to a local cache and returns the local path."""
+    """
+    Downloads S3 objects to a local cache and returns the local path.
+    """
     def __init__(self, cache_dir: str = "/tmp/dalle2_cache"):
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -54,7 +53,6 @@ class S3Cache:
     def get_csv_as_local(self, bucket: str, key: str) -> str:
         return self.get_local_path(bucket, key)
 
-
 class MidJourneyUpsamplerDataset(Dataset):
     """
     Dataset for training the upsampler.
@@ -64,7 +62,6 @@ class MidJourneyUpsamplerDataset(Dataset):
         - low_res: 64x64 conditioning image
         - clip_embedding: CLIP embedding from the 128x128 image
     """
-    
     def __init__(
         self,
         metadata_path: str,
@@ -150,7 +147,9 @@ class MidJourneyUpsamplerDataset(Dataset):
         return self.total_len
     
     def _resolve_img_path(self, img_path_csv: str) -> str:
-        """Resolve image path for local or S3 storage."""
+        """
+        Resolve image path for local or S3 storage.
+        """
         if self.using_s3:
             fname = os.path.basename(img_path_csv)
             key = f"{self.s3_prefix}/{fname}" if self.s3_prefix else fname

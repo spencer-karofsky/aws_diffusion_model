@@ -129,7 +129,7 @@ class PriorDDIMSampler:
 
         for i, t_i in enumerate(self.timesteps):
             t = torch.full((B,), t_i, dtype=torch.long, device=device)
-            eps = model(z_txt=z_txt, t=t, z_T=x_t)  # ε_θ
+            eps = model(z_txt=z_txt, t=t, z_T=x_t)
             x0 = self._predict_x0(x_t, eps, t)
 
             if i == len(self.timesteps) - 1:
@@ -173,7 +173,6 @@ class DecoderDDIMSampler:
         alpha_bar_next = _extract_alpha_bar(self.scheduler, t_next, x0.ndim)
         
         if self.eta == 0.0:
-            # Deterministic DDIM: just go from x0 -> x_{t_next}
             sigma = 0.0
             noise_term = 0.0
         else:

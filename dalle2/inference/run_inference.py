@@ -8,7 +8,6 @@ Instructions (run from CLI):
 Author:
     * Spencer Karofsky (https://github.com/spencer-karofsky)
 """
-
 from dalle2.inference.inference import DALLe2Text2Image
 import matplotlib.pyplot as plt
 import time
@@ -29,13 +28,12 @@ def visualize(img_tensor, prompt, generation_time):
     plt.show()
 
 def visualize_grid(
-    img_tuples_list,  # List[List[(cfg_scale, img_tensor)]]
-    prompts,          # List of prompts (same length as img_tuples_list)
-    generation_time,  # Float
+    img_tuples_list,
+    prompts,
+    generation_time,
     n_cols: int = 2,
     wrap_width: int = 40,
 ):
-    # Flatten (prompt, img_tensor) pairs into a flat list for display
     flat_entries = []
     for prompt, img_tuples in zip(prompts, img_tuples_list):
         for cfg, img_tensor in img_tuples:
@@ -68,32 +66,24 @@ def visualize_grid(
     fig.suptitle(f'Generated {n_images} images in {generation_time:.2f}s', fontsize=14)
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     plt.show()
-    #plt.savefig(f'dalle2/pipeline_outputs/cfg_{str(decoder_cfg)}.png')
 
 
 def main():
-    prompts = [
-        "Pizza",
-        "The planet Earth",
-        "A dog that is grazing in a field",
-        "A city skyline at night"
-    ]
-    prompts = ['purple and orange sunset' for _ in range(4)]
-
+    prompts = ['A tropical island' for _ in range(4)]
 
     pipeline = DALLe2Text2Image(
-        prior_path='dalle2/checkpoints/prior/epoch106_batch313.pth',
-        decoder_path='dalle2/checkpoints/decoder/epoch159_batch100.pth',
-        upsampler_path='dalle2/checkpoints/upsampler/epoch8_batch2000.pth',
+        prior_path='dalle2/checkpoints/prior/epoch200_batch313_ema.pth',
+        decoder_path='dalle2/checkpoints/decoder/epoch200_batch200.pth',
+        upsampler_path='dalle2/checkpoints/upsampler/epoch9_batch1000.pth',
         prior_T=1000,
         start_T=999,
-        steps_prior=200,
-        prior_cfg_scale=1.0,
+        steps_prior=300,
+        prior_cfg_scale=2.6,
         decoder_T=1000,
-        steps_decoder=100,
-        decoder_cfg_scale=1.0,
+        steps_decoder=200,
+        decoder_cfg_scale=2.2,
         upsampler_T=250,
-        steps_upsampler=50
+        steps_upsampler=220
     )
 
     t0 = time.time()
