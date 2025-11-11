@@ -18,7 +18,7 @@ This implementation was built to deeply understand the computational science und
 - Mixed-precision training, EMA weights, classifier-free guidance
 - Cosine noise scheduling for improved convergence
 - Modular architecture with comprehensive unit testing
-- Complete AWS deployment pipeline (S3, EC2, CloudWatch, IAM, VPC)
+- Complete AWS deployment pipeline (S3, SageMaker, CloudWatch, IAM, VPC)
 
 ## Architecture
 
@@ -46,21 +46,10 @@ The system consists of three main components:
 ## Training
 
 Training was conducted on AWS using custom infrastructure:
-- EC2 GPU instances (g4dn.xlarge)
+- SageMaker GPU instances (g4dn.xlarge)
 - S3 for dataset storage and model checkpoints
 - CloudWatch for monitoring training metrics
 - Complete training cost: <$60
-
-## Requirements
-```
-python>=3.8
-torch>=2.0
-transformers
-open_clip_torch
-numpy
-pillow
-boto3  # for AWS integration
-```
 
 ## Acknowledgments
 
