@@ -54,7 +54,7 @@ dataset = BostonDecoder32Dataset(
     precomputed_embeddings="/home/ec2-user/data/precomputed_embeddings.pt",
     device=device,
     noise_scheduler=noise_scheduler,
-    lowres=32,
+    lowres=64,
     n_repeat=1,
 )
 
