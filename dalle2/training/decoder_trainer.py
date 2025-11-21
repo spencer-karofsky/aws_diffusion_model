@@ -3,6 +3,7 @@ decoder_trainer.py: trains the decoder model on a single image (for overfitting 
 """
 import sys
 from pathlib import Path
+import pandas as pd
 
 # Add project root to path
 project_root = Path(__file__).resolve().parent.parent.parent
@@ -58,8 +59,15 @@ dataset = BostonDecoder32Dataset(
 )
 
 embedding_data = torch.load('/home/ec2-user/data/precomputed_embeddings.pt')
-z_img = embedding_data['embeddings'][0]
-image_path = f"/home/ec2-user/data/train_img/{embedding_data['image_paths'][0]}"
+
+# 512-dim CLIP embedding for image 0
+z_img = embedding_data['image_embeddings'][0]
+
+# metadata controls image filenames — precomputed file does not contain them
+df = pd.read_csv("/home/ec2-user/data/train_img/metadata.csv")
+first_filename = os.path.basename(df.iloc[0]["image_path"])
+image_path = f"/home/ec2-user/data/train_img/{first_filename}"
+
 
 # dataset = SingleImageOverfitDataset(
 #     image_path=image_path,
