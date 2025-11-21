@@ -96,5 +96,5 @@ if __name__ == '__main__':
         num_epochs=500,
         save_intermediate_output=4,
         save_intermediate_model=5,
-        resume_checkpoint_name='epoch49_batch9.pth'
+        resume_checkpoint_name='epoch36_batch9.pth'
     )
