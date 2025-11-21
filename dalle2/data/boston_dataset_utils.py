@@ -239,6 +239,29 @@ class BostonDecoder32Dataset(Dataset):
             "t": t.squeeze(0),
             "x0": x0,
         }
+    
+    def get_random_clean_image_and_embedding(self):
+        """
+        Returns:
+            img_true: tensor in [-1,1], shape (1, 3, H, W)
+            z_img:   tensor (512,) CLIP image embedding
+        """
+        import random
+        idx = random.randint(0, len(self.df) - 1)
+
+        row = self.df.iloc[idx]
+        fname = os.path.basename(row["image_path"])
+        local_path = os.path.join(self.images_dir, fname)
+
+        # Load image
+        img = self._load_image(local_path)  # already returns [-1,1] normalized
+        img = img.unsqueeze(0)  # add batch dim
+
+        # Load embedding
+        z_img = self.image_embeddings[fname]
+
+        return img, z_img
+
 
 class BostonUpsamplerDataset(Dataset):
     """
