@@ -252,12 +252,12 @@ class BostonDecoder32Dataset(Dataset):
         local_path = self._resolve_img(row["image_path"])
 
         # Load image
-        img = self._load_image(local_path)     # (3,H,W)
-        img = img.unsqueeze(0)                 # (1,3,H,W)
+        img = self._load_image(local_path)
+        img = img.unsqueeze(0)
 
         # Load embedding
-        z_img = self.z_img_list[idx]           # (512,)
-        z_img = z_img.unsqueeze(0)             # (1,512)
+        z_img = self.z_img_list[idx]
+        z_img = z_img.unsqueeze(0)
 
         return img, z_img
 

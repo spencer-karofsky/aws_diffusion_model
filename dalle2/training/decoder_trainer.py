@@ -29,7 +29,7 @@ device = (
 
 # Constants
 TARGET_IMG_SIZE = 64
-BATCH_SIZE = 128
+BATCH_SIZE = 64
 REPEATS = 1
 
 # Model, optimizer, scheduler
@@ -93,8 +93,8 @@ trainer = DecoderTrainer(
 
 if __name__ == '__main__':
     trainer.train(
-        num_epochs=300,
-        save_intermediate_output=1,
+        num_epochs=500,
+        save_intermediate_output=4,
         save_intermediate_model=5,
         resume_checkpoint_name='epoch49_batch9.pth'
     )
