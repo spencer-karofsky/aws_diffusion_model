@@ -254,11 +254,42 @@ class BostonDecoder32Dataset(Dataset):
         local_path = os.path.join(self.images_dir, fname)
 
         # Load image
-        img = self._load_image(local_path)  # already returns [-1,1] normalized
-        img = img.unsqueeze(0)  # add batch dim
+        img = self._load_image(local_path)
+        img = img.unsqueeze(0)
 
         # Load embedding
         z_img = self.image_embeddings[fname]
+
+        return img, z_img
+    
+    def _load_image(self, path: str):
+        """
+        Loads an image from local path, applies self.transform, returns tensor [-1,1].
+        """
+        img = Image.open(path).convert("RGB")
+        return self.transform(img)
+
+
+    def get_random_clean_image_and_embedding(self):
+        """
+        Returns:
+            img_true: (1, 3, lowres, lowres) tensor
+            z_img:    (512,) tensor
+        """
+        import random
+
+        idx = random.randint(0, len(self.df) - 1)
+        row = self.df.iloc[idx]
+
+        fname = os.path.basename(row["image_path"])
+        local_path = self._resolve_img(row["image_path"])
+
+        # Load low-res image (same as training)
+        img = self._load_image(local_path)
+        img = img.unsqueeze(0)
+
+        # Get CLIP embedding
+        z_img = self.z_img_list[idx]
 
         return img, z_img
 
