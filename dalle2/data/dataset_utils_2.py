@@ -406,16 +406,20 @@ class MidJourneyDecoderDataset(Dataset):
     def get_random_clean_image_and_embedding(self):
         idx = random.randint(0, len(self.df) - 1)
         row = self.df.iloc[idx]
-        img_path = self._resolve_img_path(str(row['image_path']))
 
-        image = Image.open(img_path).convert('RGB')
-        image_tensor = self.transform(image).unsqueeze(0).to(self.device)
+        fname = os.path.basename(row["image_path"])
+        local_path = self._resolve_img(row["image_path"])
 
-        with torch.no_grad():
-            z_img = self.clip_encoder.encode_image(image_tensor).to(self.device)
-            z_img = z_img / z_img.norm(dim=-1, keepdim=True)
+        # Load low-res image (same as training)
+        img = self._load_image(local_path)
+        img = img.unsqueeze(0)   # (1,3,H,W)
 
-        return image_tensor, z_img
+        # Get CLIP embedding
+        z_img = self.z_img_list[idx]
+        z_img = z_img.unsqueeze(0)  # (1,512)  ✔️ FIX
+
+        return img, z_img
+
     
 
 class SingleImageOverfitDataset(Dataset):
