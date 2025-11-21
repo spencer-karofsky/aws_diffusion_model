@@ -404,21 +404,26 @@ class MidJourneyDecoderDataset(Dataset):
 
 
     def get_random_clean_image_and_embedding(self):
+        """
+        Returns:
+            img_true: (1, 3, lowres, lowres)
+            z_img:    (1, 512)
+        """
         idx = random.randint(0, len(self.df) - 1)
-        row = self.df.iloc[idx]
 
-        fname = os.path.basename(row["image_path"])
+        row = self.df.iloc[idx]
         local_path = self._resolve_img(row["image_path"])
 
-        # Load low-res image (same as training)
+        # Load image
         img = self._load_image(local_path)
-        img = img.unsqueeze(0)   # (1,3,H,W)
+        img = img.unsqueeze(0)
 
-        # Get CLIP embedding
+        # Load embedding
         z_img = self.z_img_list[idx]
-        z_img = z_img.unsqueeze(0)  # (1,512)  ✔️ FIX
+        z_img = z_img.unsqueeze(0)
 
         return img, z_img
+
 
     
 
