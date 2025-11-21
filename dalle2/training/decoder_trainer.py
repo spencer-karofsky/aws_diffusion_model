@@ -15,7 +15,9 @@ import torch.optim as optim
 from dalle2.models.decoder import Decoder
 from dalle2.sampling.noise_scheduler import NoiseScheduler
 from dalle2.training.dalle2_training_aws import DecoderTrainer
-from dalle2.data.dataset_utils_2 import MidJourneyDecoderDataset, SingleImageOverfitDataset
+#from dalle2.data.dataset_utils_2 import MidJourneyDecoderDataset, SingleImageOverfitDataset
+from dalle2.data.boston_dataset_utils import BostonDecoder32Dataset
+
 
 # Device
 device = (
@@ -43,7 +45,7 @@ images_dir = "/home/ec2-user/data/train_img"
 # images_dir = 'dalle2/data/local_datasets/midjourney_v6/images'
 
 # Dataset
-dataset = MidJourneyDecoderDataset(
+dataset = BostonDecoder32Dataset(
     metadata_path=metadata_path,
     images_dir=images_dir,
     device=device,
