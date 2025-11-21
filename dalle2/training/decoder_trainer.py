@@ -27,8 +27,8 @@ device = (
 )
 
 # Constants
-TARGET_IMG_SIZE = 64
-BATCH_SIZE = 128
+TARGET_IMG_SIZE = 32
+BATCH_SIZE = 256
 REPEATS = 1
 
 # Model, optimizer, scheduler
