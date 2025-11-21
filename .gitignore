@@ -4,5 +4,10 @@
 *.json
 *.zip
 *.png
-*.pth
 __pycache__/
+*.env
+
+dalle2/data/test_unsplash.py
+dalle2/data/crop_unsplash.py
+dalle2/data/crop_unsplash.py
+dalle2/data/collect_unsplash_dataset.py

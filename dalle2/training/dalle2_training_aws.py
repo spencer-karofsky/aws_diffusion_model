@@ -617,16 +617,16 @@ class BaseTrainer(ABC):
                     fname = f"epoch{epoch+1}_batch{batch_i+1}_goodloss.pth"
                     print(f"[INFO] 🎉 Loss {loss.item():.6f} < 1e32 — saving checkpoint: {fname}")
                     self._run_intermediate_decoder_preview(epoch + 1, batch_i + 1, loss, steps=200, n_img=3)
-                    if self.on_aws:
-                        with tempfile.TemporaryDirectory() as td:
-                            local_path = os.path.join(td, fname)
-                            torch.save(self.train_module.state_dict(), local_path)
-                            key = f"{self.module_type}/checkpoints/{fname}"
-                            self._s3_put(local_path, key)
-                    else:
-                        os.makedirs(f'dalle2/checkpoints/{self.module_type}', exist_ok=True)
-                        save_path = f'dalle2/checkpoints/{self.module_type}/{fname}'
-                        torch.save(self.train_module.state_dict(), save_path)
+                    # if self.on_aws:
+                    #     with tempfile.TemporaryDirectory() as td:
+                    #         local_path = os.path.join(td, fname)
+                    #         torch.save(self.train_module.state_dict(), local_path)
+                    #         key = f"{self.module_type}/checkpoints/{fname}"
+                    #         self._s3_put(local_path, key)
+                    # else:
+                    #     os.makedirs(f'dalle2/checkpoints/{self.module_type}', exist_ok=True)
+                    #     save_path = f'dalle2/checkpoints/{self.module_type}/{fname}'
+                    #     torch.save(self.train_module.state_dict(), save_path)
                 # Save intermediate outputs
                 self._log_loss(epoch + 1, batch_i + 1, loss, plot_interval=save_intermediate_output)
 

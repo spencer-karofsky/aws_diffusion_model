@@ -16,6 +16,14 @@ def _dev() -> torch.device:
         return torch.device("mps")
     return torch.device("cpu")
 
+def count_parameters(model: torch.nn.Module, name: str = "Model") -> None:
+    total = sum(p.numel() for p in model.parameters())
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"[{name}]")
+    print(f"  Total parameters: {total:,}")
+    print(f"  Trainable parameters: {trainable:,}")
+    print(f"  Non-trainable parameters: {total - trainable:,}\n")
+
 @torch.no_grad()
 def eps_with_cfg(
         prior: Prior,
@@ -210,3 +218,16 @@ class DALLe2Text2Image:
             )
         
         return img, z_img_hat
+    
+if __name__ == "__main__":
+    dalle2 = DALLe2Text2Image(
+        prior_path='dalle2/checkpoints/prior/epoch200_batch313_ema.pth',
+        decoder_path='dalle2/checkpoints/decoder/epoch200_batch200.pth',
+        upsampler_path='dalle2/checkpoints/upsampler/epoch9_batch1000.pth',
+    )
+
+    print("\n--- PARAMETER COUNTS ---")
+    count_parameters(dalle2.prior, "Prior")
+    count_parameters(dalle2.decoder, "Decoder")
+    if dalle2.upsampler is not None:
+        count_parameters(dalle2.upsampler, "Resolution (Upsampler)")

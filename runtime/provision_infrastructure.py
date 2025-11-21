@@ -20,6 +20,10 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+import boto3
+print(boto3.client("sts").get_caller_identity())
+
+
 
 from aws.aws_setup.managers.s3_manager import S3BucketManager
 from aws.aws_setup.managers.vpc_manager import (
