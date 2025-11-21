@@ -28,7 +28,7 @@ device = (
 )
 
 # Constants
-TARGET_IMG_SIZE = 32
+TARGET_IMG_SIZE = 64
 BATCH_SIZE = 128
 REPEATS = 1
 

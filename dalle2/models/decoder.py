@@ -83,7 +83,7 @@ class Decoder(nn.Module):
         self.timestep_embedder = TimestepEmbedder(dim=self.TIMESTEP_DIM, module='decoder', T=self.T)
 
         # Define U-Net hyperparameters and instantiate the U-Net
-        self.IMG_SIZE = 32 # pixels
+        self.IMG_SIZE = 64 # pixels
         self.IN_CHANNELS = 3 # 3 color channels (RGB)
         self.COND_EMB_DIM = 512 # embedding dimensionality of the conditioning vector to inject into the U-Net
         self.BASE_CHANNELS = 64 # base channels in the first convolution layer

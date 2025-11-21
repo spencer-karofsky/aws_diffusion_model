@@ -58,7 +58,7 @@ class DecoderUNet(nn.Module):
             image_size: int = 128,
             in_channels: int = 3,
             conditional_embedding_dim: int = 512,
-            base_channels: int = 32,
+            base_channels: int = 64,
             residual_blocks: int = 2,
             on_aws: bool = False,
             debug: bool = False 
