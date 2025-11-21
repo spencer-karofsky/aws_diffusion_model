@@ -22,7 +22,7 @@ transform = transforms.Compose([
 ])
 
 # Load metadata CSV from S3
-csv_key = "metadata.csv"
+csv_key = "train_img/metadata.csv"
 obj = s3.get_object(Bucket=BUCKET, Key=csv_key)
 df = pd.read_csv(obj["Body"])
 
