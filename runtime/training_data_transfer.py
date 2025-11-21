@@ -130,7 +130,7 @@ if __name__ == "__main__":
         local_dir="/Users/spencerkarofsky/Desktop/projects/aws_diffusion_model/dalle2/data/local_datasets/unsplash/images_cropped",
         bucket_name="dalle2-data",
         s3_prefix="train_img",
-        metadata_path="dalle2/data/local_datasets/midjourney_v6/metadata.csv",
+        metadata_path="/Users/spencerkarofsky/Desktop/projects/aws_diffusion_model/dalle2/data/local_datasets/unsplash/metadata.csv",
         max_workers=None,
         print_every=1000,
         retries=3,
