@@ -45,16 +45,16 @@ images_dir = "/home/ec2-user/data/train_img"
 # images_dir = 'dalle2/data/local_datasets/midjourney_v6/images'
 
 # Dataset
+from dalle2.data.boston_dataset_utils import BostonDecoder32Dataset
+
 dataset = BostonDecoder32Dataset(
-    metadata_path=metadata_path,
-    images_dir=images_dir,
+    metadata_csv="/home/ec2-user/data/train_img/metadata.csv",
+    images_dir="/home/ec2-user/data/train_img",
+    precomputed_embeddings="/home/ec2-user/data/precomputed_embeddings.pt",
     device=device,
-    resize_size=TARGET_IMG_SIZE,
     noise_scheduler=noise_scheduler,
-    n_repeat=REPEATS,
-    # Optional: pick a larger persistent cache directory on the instance
-    # cache_dir="/home/ec2-user/dalle2_cache",
-    precomputed_embeddings_path='/home/ec2-user/data/precomputed_embeddings.pt'
+    lowres=32,
+    n_repeat=1,
 )
 
 embedding_data = torch.load('/home/ec2-user/data/precomputed_embeddings.pt')
