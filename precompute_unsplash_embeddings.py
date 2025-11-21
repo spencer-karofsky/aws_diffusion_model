@@ -1,53 +1,57 @@
-import sys
-from pathlib import Path
-project_root = Path(__file__).resolve().parent.parent.parent  # adjust based on your structure
-sys.path.insert(0, str(project_root))
-
-import torch
-from dalle2.models.clip_encoding import CLIPEncoder
-from PIL import Image
-from torchvision import transforms
-from tqdm import tqdm
 import os
+import torch
+import pandas as pd
+from PIL import Image
+import io
+import boto3
+from torchvision import transforms
+from dalle2.models.clip_encoding import CLIPEncoder
 
-# Path to your cropped images
-DATA_DIR = project_root / "dalle2" / "data" / "local_datasets" / "unsplash" / "images_cropped"
+BUCKET = "dalle2-data"
+IMAGES_PREFIX = "train_img/"
+resize = 128
 
-# Output file
-SAVE_PATH = project_root / "dalle2" / "data" / "local_datasets" / "unsplash" / "unsplash_embeddings.pt"
+s3 = boto3.client("s3")
 
-# Image preprocessing
+clip = CLIPEncoder().to("cuda").eval()
+
 transform = transforms.Compose([
-    transforms.Resize((64, 64)),
+    transforms.Resize((resize, resize), antialias=True),
     transforms.ToTensor(),
-    transforms.Normalize([0.5]*3, [0.5]*3)
+    transforms.Lambda(lambda x: x * 2 - 1),
 ])
 
-# Load CLIP Encoder
-clip = CLIPEncoder().cuda().eval()
+# Load metadata CSV from S3
+csv_key = "metadata.csv"
+obj = s3.get_object(Bucket=BUCKET, Key=csv_key)
+df = pd.read_csv(obj["Body"])
 
-# Gather image files
-image_files = [f for f in os.listdir(DATA_DIR) if f.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))]
+image_embeddings = []
+text_embeddings = []
 
-embeddings = []
-image_paths = []
+for _, row in df.iterrows():
+    fname = os.path.basename(row["image_path"])
+    key = f"{IMAGES_PREFIX}{fname}"
 
-for fname in tqdm(image_files, desc="Embedding images"):
-    img_path = DATA_DIR / fname
+    obj = s3.get_object(Bucket=BUCKET, Key=key)
+    img = Image.open(io.BytesIO(obj["Body"].read())).convert("RGB")
 
-    img = Image.open(img_path).convert("RGB")
-    img_tensor = transform(img).unsqueeze(0).cuda()
+    x = transform(img).unsqueeze(0).cuda()
 
     with torch.no_grad():
-        z_img = clip.encode_image(img_tensor)
-        z_img = z_img / z_img.norm(dim=-1, keepdim=True)   # normalize
-    embeddings.append(z_img.squeeze(0).cpu())
-    image_paths.append(fname)
+        z_img = clip.encode_image(x).squeeze(0)
+        z_txt = clip.encode_text([row["caption"]]).squeeze(0)
 
-# Save embeddings + image filenames
-torch.save({
-    "embeddings": embeddings,
-    "image_paths": image_paths
-}, SAVE_PATH)
+    image_embeddings.append(z_img.cpu())
+    text_embeddings.append(z_txt.cpu())
 
-print(f"Saved {len(embeddings)} embeddings to {SAVE_PATH}")
+output_path = "precomputed_unsplash_embeddings.pth"
+torch.save(
+    {
+        "image_embeddings": torch.stack(image_embeddings),
+        "text_embeddings": torch.stack(text_embeddings),
+    },
+    output_path
+)
+
+print("Saved:", output_path)
