@@ -94,7 +94,7 @@ trainer = DecoderTrainer(
 if __name__ == '__main__':
     trainer.train(
         num_epochs=300,
-        save_intermediate_output=50,
-        save_intermediate_model=100,
+        save_intermediate_output=1,
+        save_intermediate_model=5,
         #resume_checkpoint_name='epoch159_batch100.pth'
     )
