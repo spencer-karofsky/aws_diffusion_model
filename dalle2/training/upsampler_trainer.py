@@ -43,6 +43,8 @@ from dalle2.models.upsampler import Upsampler
 from dalle2.sampling.noise_scheduler import NoiseScheduler
 from dalle2.sampling.upsampler_ddim_sampling import UpsamplerDDIMSampler
 
+from dalle2.data.boston_dataset_utils import BostonUpsamplerDataset
+
 # Plotting
 import matplotlib
 matplotlib.use("Agg")
@@ -106,6 +108,9 @@ class UpsamplerTrainer:
         
         # Create DataLoader
         num_workers = min(4, os.cpu_count() or 1)
+
+        
+
         self.dataloader = DataLoader(
             dataset,
             batch_size=batch_size,
@@ -593,20 +598,26 @@ def main():
         weight_decay=0.01
     )
     
-    # TODO: Replace with your actual dataset
-    # dataset = YourUpsamplerDataset(...)
-    
-    # Initialize trainer
+    dataset = BostonUpsamplerDataset(
+        metadata_csv="/home/ec2-user/data/train_img/metadata.csv",
+        images_dir="/home/ec2-user/data/train_img",
+        device=device,
+        noise_scheduler=noise_scheduler,
+        lowres=64,
+        highres=128,
+        n_repeat=1,
+    )
+
     trainer = UpsamplerTrainer(
         train_module=upsampler,
         optimizer=optimizer,
         noise_scheduler=noise_scheduler,
-        dataset=None,  # Replace with actual dataset
+        dataset=dataset,
         batch_size=16,
-        on_aws=False,  # Set to True for S3 uploads
+        on_aws=True,         # or False
         use_amp=True
     )
-    
+
     # Train
     trainer.train(
         num_epochs=100,
