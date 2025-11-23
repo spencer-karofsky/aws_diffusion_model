@@ -628,7 +628,7 @@ def main():
     # Train
     trainer.train(
         num_epochs=100,
-        save_intermediate_output=100,
+        save_intermediate_output=25,
         save_intermediate_model=1000
     )
 
