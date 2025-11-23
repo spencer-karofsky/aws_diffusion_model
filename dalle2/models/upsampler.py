@@ -134,7 +134,7 @@ class Upsampler(nn.Module):
             self,
             x_t: torch.Tensor,
             low_res_img: torch.Tensor,
-           # z_img: torch.Tensor,
+            z_img: torch.Tensor,
             t: torch.Tensor
     ) -> torch.Tensor:
         """
@@ -156,15 +156,15 @@ class Upsampler(nn.Module):
             f'[Upsampler] x_t spatial dims must be ({self.high_res_size}, {self.high_res_size}), got {x_t.shape[2:]}'
         assert low_res_img.shape == (B, 3, self.low_res_size, self.low_res_size), \
             f'[Upsampler] low_res_img must have shape ({B}, 3, {self.low_res_size}, {self.low_res_size}), got {low_res_img.shape}'
-      #  assert z_img.shape == (B, 512), f'[Upsampler] z_img must have shape ({B}, 512), got {z_img.shape}'
+        assert z_img.shape == (B, 512), f'[Upsampler] z_img must have shape ({B}, 512), got {z_img.shape}'
         assert t.shape == (B,), f'[Upsampler] t must have shape ({B},), got {t.shape}'
 
         if self.debug:
             print(f'[Upsampler] x_t shape: {x_t.shape}')
             print(f'[Upsampler] low_res_img shape: {low_res_img.shape}')
-      #      print(f'[Upsampler] z_img shape: {z_img.shape}')
+            print(f'[Upsampler] z_img shape: {z_img.shape}')
             print(f'[Upsampler] t shape: {t.shape}')
-       #     print(f'[Upsampler] CLIP z_img norm: {z_img.norm(dim=-1).mean():.4f}')
+            print(f'[Upsampler] CLIP z_img norm: {z_img.norm(dim=-1).mean():.4f}')
 
         # Upsample low-res image to match high-res spatial dimensions
         low_res_upsampled = self._prepare_low_res_input(low_res_img)
