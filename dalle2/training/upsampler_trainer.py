@@ -607,6 +607,7 @@ def main():
     dataset = BostonUpsamplerDataset(
         metadata_csv="/home/ec2-user/data/train_img/metadata.csv",
         images_dir="/home/ec2-user/data/train_img",
+        precomputed_embeddings = "/home/ec2-user/aws_diffusion_model/dalle2/data/precomputed_embeddings.pth",
         device=device,
         noise_scheduler=noise_scheduler,
         lowres=64,
