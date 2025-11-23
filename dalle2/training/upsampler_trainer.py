@@ -596,7 +596,7 @@ def main():
         high_res_size=128
     )
     
-    noise_scheduler = NoiseScheduler(T=250, device=device)
+    noise_scheduler = NoiseScheduler(T=250)
     
     optimizer = torch.optim.AdamW(
         upsampler.parameters(),
