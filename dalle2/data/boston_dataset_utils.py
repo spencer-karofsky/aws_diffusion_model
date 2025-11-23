@@ -272,36 +272,42 @@ class BostonDecoder32Dataset(Dataset):
 class BostonUpsamplerDataset(Dataset):
     """
     Provides:
-        low_res      : 32×32
-        high_res     : 128×128
-        t            : diffusion timestep (if used)
-        eps_img      : noise
-        x_t          : noisy 128×128 (if diffusion is used)
+        low_res        : (3, lowres, lowres)
+        high_res       : (3, highres, highres)
+        x_t            : noisy high-res
+        eps_img        : noise
+        t              : timestep
+        clip_embedding : (512,)
     """
 
     def __init__(
         self,
         metadata_csv: str,
         images_dir: str,
+        precomputed_embeddings: str,
         device: torch.device,
-        noise_scheduler: NoiseScheduler | None = None,
+        noise_scheduler: NoiseScheduler,
         lowres: int = 32,
         highres: int = 128,
         n_repeat: int = 1,
         cache_dir: str = "/tmp/dalle2_cache",
-        diffusion: bool = True
     ):
         super().__init__()
         self.device = device
         self.noise_scheduler = noise_scheduler
-        self.diffusion = diffusion
         self.lowres = lowres
         self.highres = highres
         self.n_repeat = n_repeat
 
+        # Metadata
         self.df = pd.read_csv(metadata_csv)
 
-        # S3/local logic
+        # Load CLIP image embeddings
+        data = torch.load(precomputed_embeddings, map_location="cpu")
+        self.z_img_list = data["image_embeddings"]
+        print(f"[UpsamplerDataset] Loaded {len(self.z_img_list)} CLIP embeddings.")
+
+        # S3 / local
         self.using_s3 = is_s3_uri(images_dir)
         if self.using_s3:
             self.s3_bucket, prefix = split_s3_uri(images_dir)
@@ -322,15 +328,11 @@ class BostonUpsamplerDataset(Dataset):
             transforms.Lambda(lambda x: x*2 - 1),
         ])
 
-        if diffusion:
-            self.T = noise_scheduler.alpha_bar_t.shape[0]
-
+        self.T = noise_scheduler.alpha_bar_t.shape[0]
         self.total_len = len(self.df) * n_repeat
-
 
     def __len__(self):
         return self.total_len
-
 
     def _resolve_img(self, p: str):
         fname = os.path.basename(p)
@@ -338,7 +340,6 @@ class BostonUpsamplerDataset(Dataset):
             return os.path.join(self.images_dir, fname)
         key = f"{self.s3_prefix}/{fname}" if self.s3_prefix else fname
         return self.s3_cache.get_local_path(self.s3_bucket, key)
-
 
     def __getitem__(self, idx):
         i = idx % len(self.df)
@@ -350,18 +351,21 @@ class BostonUpsamplerDataset(Dataset):
         low = self.low_transform(img).to(self.device)
         high = self.high_transform(img).to(self.device)
 
-        if not self.diffusion:
-            return {"low": low, "high": high}
-
-        # diffusion on 128×128
+        # diffusion
         t = torch.randint(0, self.T, (1,), device=self.device)
         eps = torch.randn_like(high)
         x_t = self.noise_scheduler.q_sample(high.unsqueeze(0), t, eps.unsqueeze(0)).squeeze(0)
 
+        # CLIP embedding for conditioning
+        z_img = self.z_img_list[i].to(self.device)
+
         return {
-            "low": low,
-            "high": high,
-            "x_t": x_t,
-            "eps_img": eps,
+            "high_res": high,
+            "low_res": low,
+            "clip_embedding": z_img,
             "t": t.squeeze(0),
+            "eps_img": eps,
+            "x_t": x_t
         }
+
+
