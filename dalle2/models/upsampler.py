@@ -187,7 +187,7 @@ class Upsampler(nn.Module):
         # Forward through U-Net
         eps_pred = self.upsampler_unet(
             x_t=x_concat,
-       #     z_img=z_img,
+            z_img=z_img,
             t_emb=t_emb
         )
 
