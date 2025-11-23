@@ -234,7 +234,7 @@ class UpsamplerTrainer:
                 eps_pred = self.train_module(
                     x_t=x_t,
                     low_res_img=low_res,
-     #               z_img=clip_emb,
+                    z_img=clip_emb,
                     t=t
                 )
                 
