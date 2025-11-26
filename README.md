@@ -1,6 +1,6 @@
 # End-to-End DALL·E 2 Implementation from Scratch
 
-### [Visit my website for More Details!](https://www.spencerkarofsky.com/dalle2/)
+### [Visit my Website for More Details!](https://www.spencerkarofsky.com/dalle2/)
 
 A complete implementation of OpenAI's DALL·E 2 text-to-image generation system, built entirely from first principles. This project includes a CLIP text encoder, cascaded diffusion decoder (64x64 → 128x128), and modular AWS infrastructure for scalable training and inference.
 
