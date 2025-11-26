@@ -69,20 +69,24 @@ def visualize_grid(
 
 
 def main():
-    prompts = ['A tropical island' for _ in range(4)]
+    prompts = ['a city sunset' for _ in range(4)]
+    # prompts = [
+    #     'city scape during nighttime',
+    #     'a street light in the middle of a snowy park'
+    # ]
 
     pipeline = DALLe2Text2Image(
-        prior_path='dalle2/checkpoints/prior/epoch200_batch313_ema.pth',
-        decoder_path='dalle2/checkpoints/decoder/epoch200_batch200.pth',
-        upsampler_path='dalle2/checkpoints/upsampler/epoch9_batch1000.pth',
+        prior_path='dalle2/checkpoints/prior/boston_prior_ema.pth',
+        decoder_path='dalle2/checkpoints/decoder/boston_decoder_final.pth',
+        upsampler_path='dalle2/checkpoints/upsampler/boston_upsampler_final.pth',
         prior_T=1000,
         start_T=999,
-        steps_prior=300,
-        prior_cfg_scale=2.6,
+        steps_prior=400,
+        prior_cfg_scale=2.0,
         decoder_T=1000,
-        steps_decoder=200,
-        decoder_cfg_scale=2.2,
-        upsampler_T=250,
+        steps_decoder=400,
+        decoder_cfg_scale=4.2,
+        upsampler_T=400,
         steps_upsampler=220
     )
 

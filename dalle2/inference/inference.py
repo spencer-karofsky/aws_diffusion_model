@@ -10,6 +10,7 @@ from dalle2.sampling.noise_scheduler import NoiseScheduler
 from dalle2.sampling.ddim_sampling import DecoderDDIMSampler
 
 def _dev() -> torch.device:
+    return torch.device('cpu')
     if torch.cuda.is_available():
         return torch.device("cuda")
     if torch.backends.mps.is_available():

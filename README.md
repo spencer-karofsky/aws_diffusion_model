@@ -2,6 +2,8 @@
 
 A complete implementation of OpenAI's DALL·E 2 text-to-image generation system, built entirely from first principles. This project includes a CLIP text encoder, cascaded diffusion decoder (64x64 → 128x128), and modular AWS infrastructure for scalable training and inference.
 
+![alt text](image.png)
+
 ## Overview
 
 This implementation was built to deeply understand the computational science underlying modern generative models—how architectural choices, optimization dynamics, and numerical methods converge to create emergent intelligence.

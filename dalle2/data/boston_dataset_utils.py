@@ -106,6 +106,36 @@ class BostonPriorDataset(Dataset):
 
     def __len__(self):
         return self.total_len
+    
+
+    def get_random_text_and_embedding(self):
+        """
+        Returns:
+            z_txt : (512,)
+            z_img : (512,)
+        """
+        idx = torch.randint(low=0, high=len(self.df), size=(1,)).item()
+
+        if self.use_precomputed:
+            z_img = self.z_img_list[idx].clone()
+            z_txt = self.z_txt_list[idx].clone()
+        else:
+            # fallback (should never hit because you use precomputed embeddings)
+            row = self.df.iloc[idx]
+            caption = row["caption"]
+            img_path = self._resolve_img_path(row["image_path"])
+
+            image = Image.open(img_path).convert("RGB")
+            x = self.transform(image).unsqueeze(0).to(self.device)
+            with torch.no_grad():
+                z_img = self.clip.encode_image(x).squeeze(0)
+                z_txt = self.clip.encode_text([caption]).squeeze(0)
+
+            z_img = F.normalize(z_img, dim=-1)
+            z_txt = F.normalize(z_txt, dim=-1)
+
+        return z_txt, z_img
+
 
 
     def _resolve_img_path(self, rel_path: str) -> str:

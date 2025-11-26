@@ -53,13 +53,22 @@ class CLIPEncoder(nn.Module):
             device: computation device (defaults to GPU if available)
         """
         super().__init__()
-        if not device:
+        if device is None:
             if torch.cuda.is_available():
-                self.device = 'cuda'
-            elif torch.mps.is_available():
-                self.device = 'mps'
+                self.device = torch.device("cuda")
             else:
-                self.device = 'cpu'
+                # Always fallback to CPU because open_clip breaks on MPS
+                self.device = torch.device("cpu")
+        else:
+            # User supplied something — override it
+            dev = str(device)
+            if dev.lower() in ["mps", "mps:0", "apple", "metal"]:
+                print("[WARN] MPS is disabled for CLIP. Falling back to CPU.")
+                self.device = torch.device("cpu")
+            else:
+                self.device = torch.device(device)
+        #self.device = device
+
 
         self.model, _, self.preprocess = open_clip.create_model_and_transforms(
             model_name, pretrained=pretrained

@@ -315,10 +315,16 @@ class BaseTrainer(ABC):
                     # Inputs
                     z_txt = F.normalize(batch['z_txt'].to(self.device), dim=-1)
 
+                    # ------------------------------------------------------------
+                    # FIX FOR MPS: encode empty text on CPU; MPS backend breaks
+                    # ------------------------------------------------------------
                     if not hasattr(self, "_null_txt"):
-                        clip = CLIPEncoder().to(self.device).eval()
+                        clip_cpu = CLIPEncoder().to("cpu").eval()
                         with torch.no_grad():
-                            self._null_txt = F.normalize(clip.encode_text([""]).to(self.device), dim=-1)
+                            null_txt_cpu = clip_cpu.encode_text([""]).cpu()        # encode text on CPU only
+                            null_txt_cpu = F.normalize(null_txt_cpu, dim=-1)       # still on CPU
+                        self._null_txt = null_txt_cpu.to(self.device)              # move *embedding* to MPS/cuda/cpu
+
 
                     p_uncond = 0.2
                     if self.module_type == 'prior':
